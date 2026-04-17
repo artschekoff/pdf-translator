@@ -1,0 +1,34 @@
+services:
+  paddleocr:
+    image: oslovision/paddle-ocr-http:latest
+    ports:
+      - "127.0.0.1:8051:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  tesseract:
+    image: gunthercox/ocr-service:tesseract
+    ports:
+      - "127.0.0.1:8052:8000"
+    restart: unless-stopped
+    profiles: ["tesseract"]
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      PADDLE_OCR_URL: http://paddleocr:8000
+      TESSERACT_URL: http://tesseract:8000
+    volumes:
+      - ./input:/data/input:ro
+      - ./output:/data/output
+    depends_on:
+      paddleocr:
+        condition: service_healthy
+    profiles: ["app"]
