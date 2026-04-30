@@ -168,9 +168,10 @@ func (r *Renderer) RenderPage(ctx context.Context, inputPath string, password st
 	catalogRef := w.AllocRef()
 	copier := newPageCopier(reader, w)
 
+	usedRunes := collectUsedRunes(blocks)
 	var ttfFontRef pdf.Ref
 	if ttfFont != nil {
-		ref, embedErr := ttfFont.EmbedInPDF(w)
+		ref, embedErr := ttfFont.EmbedInPDF(w, usedRunes)
 		if embedErr != nil {
 			r.logger.Warn("TTF embed failed, falling back to Helvetica",
 				zap.Int("page", pageNum),
@@ -465,6 +466,20 @@ func (r *Renderer) storeFontCache(script string, f *TTFFont) {
 	r.fontCacheMu.Lock()
 	r.fontCache[script] = f
 	r.fontCacheMu.Unlock()
+}
+
+func collectUsedRunes(blocks []domain.TextBlock) []rune {
+	seen := make(map[rune]bool)
+	for _, b := range blocks {
+		for _, r := range b.Translated {
+			seen[r] = true
+		}
+	}
+	runes := make([]rune, 0, len(seen))
+	for r := range seen {
+		runes = append(runes, r)
+	}
+	return runes
 }
 
 // buildOverlayFonts returns a pdf.Dict mapping overlay font names to their

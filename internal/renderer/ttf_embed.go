@@ -364,10 +364,13 @@ func (f *TTFFont) scaledInt(v int16) int {
 
 // EmbedInPDF writes the font objects to w and returns an indirect Ref to the
 // Type0 font dictionary. Put this Ref in the page Resources /Font dict.
-func (f *TTFFont) EmbedInPDF(w *pdf.Writer) (pdf.Ref, error) {
-	// FontFile2 stream (raw TTF bytes).
+// usedRunes is the set of Unicode codepoints actually rendered; the font is
+// subsetted to only include those glyphs, keeping file sizes small.
+func (f *TTFFont) EmbedInPDF(w *pdf.Writer, usedRunes []rune) (pdf.Ref, error) {
+	// FontFile2 stream: subset to only the glyphs actually used on this page.
+	fontData := f.SubsetData(usedRunes)
 	fontFileRef := w.AllocRef()
-	if err := w.WriteStream(fontFileRef, pdf.Dict{"Length1": len(f.data)}, f.data); err != nil {
+	if err := w.WriteStream(fontFileRef, pdf.Dict{"Length1": len(fontData)}, fontData); err != nil {
 		return pdf.Ref{}, fmt.Errorf("writing font stream: %w", err)
 	}
 
@@ -474,4 +477,311 @@ func buildToUnicodeCMap(fontName string, glyphMap map[rune]uint16) []byte {
 
 	sb.WriteString("endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n")
 	return []byte(sb.String())
+}
+
+// SubsetData returns a TTF containing only glyphs needed for usedRunes.
+// GID numbering is preserved so Identity-H encoded hex strings remain valid.
+// Falls back to the full font on any parsing error.
+func (f *TTFFont) SubsetData(usedRunes []rune) []byte {
+	tables, err := parseTTFTables(f.data)
+	if err != nil {
+		return f.data
+	}
+
+	headData := tables["head"]
+	locaData := tables["loca"]
+	glyFData := tables["glyf"]
+	if len(headData) < 52 || len(locaData) == 0 || len(glyFData) == 0 {
+		return f.data
+	}
+
+	isLongLoca := binary.BigEndian.Uint16(headData[50:]) == 1
+
+	numGlyphs := 0
+	if d := tables["maxp"]; len(d) >= 6 {
+		numGlyphs = int(binary.BigEndian.Uint16(d[4:]))
+	}
+	if numGlyphs == 0 {
+		return f.data
+	}
+
+	usedGIDs := map[uint16]bool{0: true}
+	for _, r := range usedRunes {
+		if gid, ok := f.glyphMap[r]; ok {
+			usedGIDs[gid] = true
+		}
+	}
+
+	locaOffsets := subsetParseLoca(locaData, numGlyphs, isLongLoca)
+	subsetExpandComposites(glyFData, locaOffsets, usedGIDs)
+
+	maxGID := uint16(0)
+	for gid := range usedGIDs {
+		if gid > maxGID {
+			maxGID = gid
+		}
+	}
+	newNumGlyphs := int(maxGID) + 1
+
+	newGlyf, newLoca := subsetBuildGlyfLoca(glyFData, locaOffsets, usedGIDs, newNumGlyphs)
+
+	origNumHMetrics := 0
+	if d := tables["hhea"]; len(d) >= 36 {
+		origNumHMetrics = int(binary.BigEndian.Uint16(d[34:]))
+	}
+	newHmtx := subsetBuildHmtx(tables["hmtx"], origNumHMetrics, newNumGlyphs)
+
+	newMaxp := cloneBytes(tables["maxp"])
+	if len(newMaxp) >= 6 {
+		binary.BigEndian.PutUint16(newMaxp[4:], uint16(newNumGlyphs))
+	}
+	newHhea := cloneBytes(tables["hhea"])
+	if len(newHhea) >= 36 {
+		binary.BigEndian.PutUint16(newHhea[34:], uint16(newNumGlyphs))
+	}
+	newHead := cloneBytes(headData)
+	if len(newHead) >= 52 {
+		binary.BigEndian.PutUint16(newHead[50:], 1) // long loca
+	}
+
+	newTables := make(map[string][]byte, len(tables))
+	for k, v := range tables {
+		newTables[k] = v
+	}
+	newTables["glyf"] = newGlyf
+	newTables["loca"] = newLoca
+	newTables["maxp"] = newMaxp
+	newTables["hhea"] = newHhea
+	newTables["head"] = newHead
+	newTables["hmtx"] = newHmtx
+
+	return assembleTTF(f.data[:4], newTables)
+}
+
+func cloneBytes(b []byte) []byte {
+	c := make([]byte, len(b))
+	copy(c, b)
+	return c
+}
+
+func ttfTableChecksum(data []byte) uint32 {
+	var sum uint32
+	i := 0
+	for ; i+3 < len(data); i += 4 {
+		sum += binary.BigEndian.Uint32(data[i:])
+	}
+	if rem := len(data) - i; rem > 0 {
+		var last [4]byte
+		copy(last[:], data[i:])
+		sum += binary.BigEndian.Uint32(last[:])
+	}
+	return sum
+}
+
+func subsetParseLoca(data []byte, numGlyphs int, isLong bool) []uint32 {
+	offsets := make([]uint32, numGlyphs+1)
+	if isLong {
+		for i := range numGlyphs + 1 {
+			off := i * 4
+			if off+4 > len(data) {
+				break
+			}
+			offsets[i] = binary.BigEndian.Uint32(data[off:])
+		}
+	} else {
+		for i := range numGlyphs + 1 {
+			off := i * 2
+			if off+2 > len(data) {
+				break
+			}
+			offsets[i] = uint32(binary.BigEndian.Uint16(data[off:])) * 2
+		}
+	}
+	return offsets
+}
+
+// subsetExpandComposites adds component GIDs of composite glyphs to used via BFS.
+func subsetExpandComposites(glyf []byte, loca []uint32, used map[uint16]bool) {
+	queue := make([]uint16, 0, len(used))
+	for gid := range used {
+		queue = append(queue, gid)
+	}
+	for len(queue) > 0 {
+		gid := queue[0]
+		queue = queue[1:]
+		idx := int(gid)
+		if idx+1 >= len(loca) {
+			continue
+		}
+		start, end := loca[idx], loca[idx+1]
+		if start >= end || int(end) > len(glyf) {
+			continue
+		}
+		entry := glyf[start:end]
+		if len(entry) < 10 {
+			continue
+		}
+		if int16(binary.BigEndian.Uint16(entry[:2])) >= 0 {
+			continue // simple glyph
+		}
+		// Composite: skip numberOfContours(2) + bounding box(8) = 10 bytes.
+		pos := 10
+		for pos+4 <= len(entry) {
+			flags := binary.BigEndian.Uint16(entry[pos:])
+			compGID := binary.BigEndian.Uint16(entry[pos+2:])
+			if !used[compGID] {
+				used[compGID] = true
+				queue = append(queue, compGID)
+			}
+			pos += 4
+			if flags&0x0001 != 0 {
+				pos += 4 // ARG_1_AND_2_ARE_WORDS
+			} else {
+				pos += 2
+			}
+			switch {
+			case flags&0x0008 != 0:
+				pos += 2 // WE_HAVE_A_SCALE
+			case flags&0x0040 != 0:
+				pos += 4 // WE_HAVE_AN_X_AND_Y_SCALE
+			case flags&0x0080 != 0:
+				pos += 8 // WE_HAVE_A_2X2
+			}
+			if flags&0x0020 == 0 { // no MORE_COMPONENTS
+				break
+			}
+		}
+	}
+}
+
+func subsetBuildGlyfLoca(glyf []byte, loca []uint32, used map[uint16]bool, numGlyphs int) (newGlyf, newLoca []byte) {
+	var buf []byte
+	offsets := make([]uint32, numGlyphs+1)
+	for i := range numGlyphs {
+		offsets[i] = uint32(len(buf))
+		if !used[uint16(i)] || i+1 >= len(loca) {
+			continue
+		}
+		start, end := loca[i], loca[i+1]
+		if start >= end || int(end) > len(glyf) {
+			continue
+		}
+		buf = append(buf, glyf[start:end]...)
+		if pad := len(buf) % 4; pad != 0 {
+			buf = append(buf, make([]byte, 4-pad)...)
+		}
+	}
+	offsets[numGlyphs] = uint32(len(buf))
+	// Always write long loca (uint32).
+	newLoca = make([]byte, (numGlyphs+1)*4)
+	for i, off := range offsets {
+		binary.BigEndian.PutUint32(newLoca[i*4:], off)
+	}
+	return buf, newLoca
+}
+
+// subsetBuildHmtx builds an hmtx with newNumGlyphs full (advanceWidth+lsb)
+// records, setting numberOfHMetrics = newNumGlyphs in the caller's hhea patch.
+func subsetBuildHmtx(hmtx []byte, origNumHMetrics, newNumGlyphs int) []byte {
+	out := make([]byte, newNumGlyphs*4)
+	for i := range newNumGlyphs {
+		var aw, lsb uint16
+		if i < origNumHMetrics {
+			off := i * 4
+			if off+4 <= len(hmtx) {
+				aw = binary.BigEndian.Uint16(hmtx[off:])
+				lsb = binary.BigEndian.Uint16(hmtx[off+2:])
+			}
+		} else {
+			if origNumHMetrics > 0 {
+				lastOff := (origNumHMetrics - 1) * 4
+				if lastOff+2 <= len(hmtx) {
+					aw = binary.BigEndian.Uint16(hmtx[lastOff:])
+				}
+			}
+			lsbOff := origNumHMetrics*4 + (i-origNumHMetrics)*2
+			if lsbOff+2 <= len(hmtx) {
+				lsb = binary.BigEndian.Uint16(hmtx[lsbOff:])
+			}
+		}
+		binary.BigEndian.PutUint16(out[i*4:], aw)
+		binary.BigEndian.PutUint16(out[i*4+2:], lsb)
+	}
+	return out
+}
+
+func assembleTTF(sfVersion []byte, tables map[string][]byte) []byte {
+	tags := make([]string, 0, len(tables))
+	for tag, data := range tables {
+		if len(data) > 0 {
+			tags = append(tags, tag)
+		}
+	}
+	sort.Strings(tags)
+	n := len(tags)
+
+	sr, es := 1, 0
+	for sr*2 <= n {
+		sr *= 2
+		es++
+	}
+
+	type entry struct {
+		tag    string
+		data   []byte
+		offset uint32
+		chksum uint32
+	}
+	entries := make([]entry, n)
+	cur := uint32(12 + n*16)
+	for i, tag := range tags {
+		data := tables[tag]
+		var chk uint32
+		if tag == "head" && len(data) >= 12 {
+			tmp := cloneBytes(data)
+			binary.BigEndian.PutUint32(tmp[8:], 0)
+			chk = ttfTableChecksum(tmp)
+		} else {
+			chk = ttfTableChecksum(data)
+		}
+		entries[i] = entry{tag, data, cur, chk}
+		cur += (uint32(len(data)) + 3) &^ 3
+	}
+
+	out := make([]byte, int(cur))
+	copy(out[0:4], sfVersion)
+	binary.BigEndian.PutUint16(out[4:], uint16(n))
+	binary.BigEndian.PutUint16(out[6:], uint16(sr*16))
+	binary.BigEndian.PutUint16(out[8:], uint16(es))
+	binary.BigEndian.PutUint16(out[10:], uint16(n*16-sr*16))
+
+	for i, e := range entries {
+		rec := out[12+i*16:]
+		copy(rec[0:4], []byte(e.tag))
+		binary.BigEndian.PutUint32(rec[4:], e.chksum)
+		binary.BigEndian.PutUint32(rec[8:], e.offset)
+		binary.BigEndian.PutUint32(rec[12:], uint32(len(e.data)))
+		copy(out[e.offset:], e.data)
+	}
+
+	// Fix head.checkSumAdjustment.
+	var headOff uint32
+	for _, e := range entries {
+		if e.tag == "head" {
+			headOff = e.offset
+			break
+		}
+	}
+	if headOff > 0 && int(headOff)+12 <= len(out) {
+		binary.BigEndian.PutUint32(out[headOff+8:], 0)
+	}
+	var fileSum uint32
+	for i := 0; i+3 < len(out); i += 4 {
+		fileSum += binary.BigEndian.Uint32(out[i:])
+	}
+	if headOff > 0 && int(headOff)+12 <= len(out) {
+		binary.BigEndian.PutUint32(out[headOff+8:], 0xB1B0AFBA-fileSum)
+	}
+
+	return out
 }
