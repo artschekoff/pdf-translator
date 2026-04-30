@@ -1,13 +1,18 @@
 services:
   paddleocr:
-    image: oslovision/paddle-ocr-http:latest
+    build:
+      context: ./deploy/paddleocr
+      dockerfile: Dockerfile
     ports:
       - "127.0.0.1:8051:8000"
+    environment:
+      OCR_LANG: ${OCR_LANG:-en}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 180s
     restart: unless-stopped
 
   tesseract:

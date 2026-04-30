@@ -75,10 +75,10 @@ func (r *PaddleRecognizer) Recognize(ctx context.Context, imageData []byte, page
 		return nil, fmt.Errorf("PaddleOCR reported failure")
 	}
 
-	return convertPaddleResults(result.Details, dpi), nil
+	return convertPaddleResults(result.Details, pageHeight, dpi), nil
 }
 
-func convertPaddleResults(details []paddleDetail, dpi int) []domain.TextBlock {
+func convertPaddleResults(details []paddleDetail, pageHeight float64, dpi int) []domain.TextBlock {
 	blocks := make([]domain.TextBlock, 0, len(details))
 
 	for _, d := range details {
@@ -102,9 +102,10 @@ func convertPaddleResults(details []paddleDetail, dpi int) []domain.TextBlock {
 		}
 
 		pdfX := PixelToPDFPoint(minX, dpi)
-		pdfY := PixelToPDFPoint(minY, dpi)
 		pdfW := PixelToPDFPoint(maxX-minX, dpi)
 		pdfH := PixelToPDFPoint(maxY-minY, dpi)
+		// Image Y is top-down; PDF Y is bottom-up. Flip using page height.
+		pdfY := pageHeight - PixelToPDFPoint(maxY, dpi)
 
 		estimatedFontSize, blockType := ClassifyBlock(pdfH)
 
