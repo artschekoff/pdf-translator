@@ -41,6 +41,17 @@ func TestFitText_TruncatesAsLastResort(t *testing.T) {
 	assert.NotEmpty(t, result.Lines)
 }
 
+func TestFitText_ExpandsBoxHeightForModerateOverflow(t *testing.T) {
+	bbox := domain.BoundingBox{X: 0, Y: 0, Width: 90, Height: 20}
+	text := "Bitcoin A Peer to Peer Electronic Cash System Whitepaper"
+
+	result := FitText(text, bbox, 14)
+
+	assert.True(t, result.Overflow)
+	assert.Greater(t, result.BoxHeight, bbox.Height)
+	assert.GreaterOrEqual(t, len(result.Lines), 2)
+}
+
 func TestFitText_PreservesNewlines(t *testing.T) {
 	bbox := domain.BoundingBox{X: 0, Y: 0, Width: 200, Height: 100}
 	text := "Line one\nLine two\nLine three"

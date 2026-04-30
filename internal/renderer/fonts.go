@@ -12,10 +12,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// Font variant mappings for Noto Sans family.
+// scriptFontMap maps script names to NotoSans font variants.
+// NotoSans-Regular covers Latin and Cyrillic; specialised variants handle
+// other scripts.
 var scriptFontMap = map[string]fontInfo{
-	"latin":      {filename: "NotoSans-Regular.ttf", url: "https://github.com/google/fonts/raw/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf"},
-	"cyrillic":   {filename: "NotoSans-Regular.ttf", url: ""},
+	"latin":      {filename: "NotoSans-Regular.ttf", url: "https://github.com/google/fonts/raw/main/ofl/notosans/static/NotoSans-Regular.ttf"},
+	"cyrillic":   {filename: "NotoSans-Regular.ttf", url: "https://github.com/google/fonts/raw/main/ofl/notosans/static/NotoSans-Regular.ttf"},
 	"arabic":     {filename: "NotoSansArabic-Regular.ttf", url: "https://github.com/google/fonts/raw/main/ofl/notosansarabic/NotoSansArabic%5Bwdth%2Cwght%5D.ttf"},
 	"hebrew":     {filename: "NotoSansHebrew-Regular.ttf", url: "https://github.com/google/fonts/raw/main/ofl/notosanshebrew/NotoSansHebrew%5Bwdth%2Cwght%5D.ttf"},
 	"devanagari": {filename: "NotoSansDevanagari-Regular.ttf", url: "https://github.com/google/fonts/raw/main/ofl/notosansdevanagari/NotoSansDevanagari%5Bwdth%2Cwght%5D.ttf"},
@@ -30,34 +32,56 @@ type fontInfo struct {
 }
 
 // FontManager handles font file resolution and on-demand downloading.
+// User-configured paths (from .env FONT_* vars) take precedence over
+// downloaded fonts.
 type FontManager struct {
-	fontsDir   string
-	httpClient *http.Client
+	fontsDir      string
+	httpClient    *http.Client
+	overridePaths map[string]string // script → absolute path from config
 }
 
 func NewFontManager(dataDir string) *FontManager {
+	return NewFontManagerWithOverrides(dataDir, nil)
+}
+
+func NewFontManagerWithOverrides(dataDir string, overrides map[string]string) *FontManager {
 	return &FontManager{
 		fontsDir: filepath.Join(dataDir, "fonts"),
 		httpClient: &http.Client{
 			Timeout: 2 * time.Minute,
 		},
+		overridePaths: overrides,
 	}
 }
 
 // FontPath returns the filesystem path for the font matching the given script.
-// Downloads the font on first use if not cached.
+// Resolution order:
+//  1. User-configured override path (FONT_* in .env)
+//  2. Cached font in data directory
+//  3. Font bundled next to the binary
+//  4. Download from upstream URL
 func (fm *FontManager) FontPath(ctx context.Context, script string) (string, error) {
+	// 1. User override.
+	if fm.overridePaths != nil {
+		if p, ok := fm.overridePaths[script]; ok && p != "" {
+			if _, err := os.Stat(p); err == nil {
+				return p, nil
+			}
+		}
+	}
+
 	info, ok := scriptFontMap[script]
 	if !ok {
 		info = scriptFontMap["latin"]
 	}
 
-	path := filepath.Join(fm.fontsDir, info.filename)
-	if _, err := os.Stat(path); err == nil {
-		return path, nil
+	// 2. Cached download.
+	cachedPath := filepath.Join(fm.fontsDir, info.filename)
+	if _, err := os.Stat(cachedPath); err == nil {
+		return cachedPath, nil
 	}
 
-	// Check bundled fonts directory next to the binary.
+	// 3. Bundled next to the binary.
 	exePath, exeErr := os.Executable()
 	if exeErr != nil {
 		exePath = "."
@@ -68,14 +92,14 @@ func (fm *FontManager) FontPath(ctx context.Context, script string) (string, err
 	}
 
 	if info.url == "" {
-		return "", fmt.Errorf("font %s not found and no download URL available", info.filename)
+		return "", fmt.Errorf("font %s not found and no download URL configured", info.filename)
 	}
 
+	// 4. Download.
 	if err := fm.downloadFont(ctx, info); err != nil {
 		return "", fmt.Errorf("downloading font %s: %w", info.filename, err)
 	}
-
-	return path, nil
+	return cachedPath, nil
 }
 
 func (fm *FontManager) downloadFont(ctx context.Context, info fontInfo) error {
@@ -85,7 +109,7 @@ func (fm *FontManager) downloadFont(ctx context.Context, info fontInfo) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, info.url, nil)
 	if err != nil {
-		return fmt.Errorf("creating font request: %w", err)
+		return fmt.Errorf("creating request: %w", err)
 	}
 	resp, err := fm.httpClient.Do(req)
 	if err != nil {
@@ -109,11 +133,10 @@ func (fm *FontManager) downloadFont(ctx context.Context, info fontInfo) error {
 		os.Remove(path)
 		return fmt.Errorf("writing font file: %w", err)
 	}
-
 	return nil
 }
 
-// DownloadAllFonts pre-downloads all font variants.
+// DownloadAllFonts pre-downloads all font variants that have a URL configured.
 func (fm *FontManager) DownloadAllFonts(ctx context.Context, logger *zap.Logger) error {
 	for script, info := range scriptFontMap {
 		if ctx.Err() != nil {
@@ -122,13 +145,11 @@ func (fm *FontManager) DownloadAllFonts(ctx context.Context, logger *zap.Logger)
 		if info.url == "" {
 			continue
 		}
-
 		path := filepath.Join(fm.fontsDir, info.filename)
 		if _, err := os.Stat(path); err == nil {
 			logger.Info("font already cached", zap.String("script", script))
 			continue
 		}
-
 		logger.Info("downloading font", zap.String("script", script), zap.String("file", info.filename))
 		if err := fm.downloadFont(ctx, info); err != nil {
 			return fmt.Errorf("downloading %s font: %w", script, err)

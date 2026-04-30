@@ -18,6 +18,39 @@ type Config struct {
 	DPI            int           `mapstructure:"DPI"`
 	DataDir        string        `mapstructure:"DATA_DIR"`
 	HTTPTimeout    time.Duration `mapstructure:"HTTP_TIMEOUT"`
+
+	// Per-script TTF font paths. When set, the renderer uses these files
+	// directly instead of downloading fonts. A single font file that covers
+	// multiple scripts (e.g. NotoSans covers Latin + Cyrillic) can be reused
+	// across several entries.
+	FontLatin      string `mapstructure:"FONT_LATIN"`
+	FontCyrillic   string `mapstructure:"FONT_CYRILLIC"`
+	FontArabic     string `mapstructure:"FONT_ARABIC"`
+	FontHebrew     string `mapstructure:"FONT_HEBREW"`
+	FontDevanagari string `mapstructure:"FONT_DEVANAGARI"`
+	FontThai       string `mapstructure:"FONT_THAI"`
+	FontKorean     string `mapstructure:"FONT_KOREAN"`
+	FontCJK        string `mapstructure:"FONT_CJK"`
+}
+
+// ScriptFontPaths returns a map of script name → font file path built from
+// the individual FONT_* config entries. Only populated entries are included.
+func (c *Config) ScriptFontPaths() map[string]string {
+	m := make(map[string]string)
+	add := func(script, path string) {
+		if path != "" {
+			m[script] = path
+		}
+	}
+	add("latin", c.FontLatin)
+	add("cyrillic", c.FontCyrillic)
+	add("arabic", c.FontArabic)
+	add("hebrew", c.FontHebrew)
+	add("devanagari", c.FontDevanagari)
+	add("thai", c.FontThai)
+	add("korean", c.FontKorean)
+	add("cjk", c.FontCJK)
+	return m
 }
 
 func Load() (*Config, error) {

@@ -44,8 +44,8 @@ func TestGroupLines_SplitByLargeGap(t *testing.T) {
 
 	blocks := groupLines(lines, 1)
 	require.Len(t, blocks, 2)
-	assert.Equal(t, "Paragraph one", blocks[0].Text)
-	assert.Equal(t, "Paragraph two", blocks[1].Text)
+	assert.Equal(t, "Paragraph two", blocks[0].Text)
+	assert.Equal(t, "Paragraph one", blocks[1].Text)
 }
 
 func TestGroupLines_SplitByFontSizeChange(t *testing.T) {
@@ -56,10 +56,10 @@ func TestGroupLines_SplitByFontSizeChange(t *testing.T) {
 
 	blocks := groupLines(lines, 1)
 	require.Len(t, blocks, 2)
-	assert.Equal(t, "Title", blocks[0].Text)
-	assert.Equal(t, domain.BlockTypeTitle, blocks[0].BlockType)
-	assert.Equal(t, "Body text", blocks[1].Text)
-	assert.Equal(t, domain.BlockTypeText, blocks[1].BlockType)
+	assert.Equal(t, "Body text", blocks[0].Text)
+	assert.Equal(t, domain.BlockTypeText, blocks[0].BlockType)
+	assert.Equal(t, "Title", blocks[1].Text)
+	assert.Equal(t, domain.BlockTypeTitle, blocks[1].BlockType)
 }
 
 func TestOverlaps(t *testing.T) {

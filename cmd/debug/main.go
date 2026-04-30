@@ -1,37 +1,23 @@
+//go:build ignore
+
 package main
 
 import (
-	"fmt"
-	"os"
-	"strings"
-
-	"github.com/gen2brain/go-fitz"
-	"github.com/pdf-translator/pdf-translator/internal/domain"
+    "fmt"
+    "github.com/pdf-translator/pdf-translator/internal/renderer"
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: debug <pdf-path>\n")
-		os.Exit(1)
-	}
-
-	doc, err := fitz.New(os.Args[1])
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "open: %v\n", err)
-		os.Exit(1)
-	}
-	defer doc.Close()
-
-	text, err := doc.Text(0)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "text: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Println("=== MuPDF Text (page 1) ===")
-	for i, line := range strings.Split(text, "\n") {
-		if strings.TrimSpace(line) != "" {
-			fmt.Printf("  Line %d: %q\n", i, domain.TruncateString(line, 100))
-		}
-	}
+    f, err := renderer.LoadTTFFont("/Users/riskyworks/Library/Fonts/JetBrainsMono-Regular.ttf")
+    if err != nil {
+        fmt.Println("Error:", err)
+        return
+    }
+    
+    testRunes := []rune{'A', 'Z', 'А', 'Я', 'а', 'я'}
+    for _, r := range testRunes {
+        has := f.HasGlyph(r)
+        fmt.Printf("U+%04X %c: glyph=%v  hex=%s\n", r, r, has, f.EncodeTextHex(string(r)))
+    }
+    fmt.Println("\nFont name:", f.HasGlyph('А'))
 }

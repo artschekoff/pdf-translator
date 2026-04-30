@@ -19,6 +19,7 @@ type LayoutResult struct {
 	Lines      []string
 	FontSize   float64
 	LineHeight float64
+	BoxHeight  float64
 	Overflow   bool
 }
 
@@ -41,6 +42,7 @@ func FitText(text string, bbox domain.BoundingBox, originalFontSize float64) Lay
 			Lines:      lines,
 			FontSize:   fontSize,
 			LineHeight: lineHeight,
+			BoxHeight:  bbox.Height,
 		}
 	}
 
@@ -56,6 +58,7 @@ func FitText(text string, bbox domain.BoundingBox, originalFontSize float64) Lay
 				Lines:      lines,
 				FontSize:   fontSize,
 				LineHeight: lineHeight,
+				BoxHeight:  bbox.Height,
 			}
 		}
 	}
@@ -71,6 +74,7 @@ func FitText(text string, bbox domain.BoundingBox, originalFontSize float64) Lay
 			Lines:      lines,
 			FontSize:   fontSize,
 			LineHeight: lineHeight,
+			BoxHeight:  totalHeight,
 			Overflow:   true,
 		}
 	}
@@ -92,6 +96,7 @@ func FitText(text string, bbox domain.BoundingBox, originalFontSize float64) Lay
 		Lines:      lines,
 		FontSize:   fontSize,
 		LineHeight: lineHeight,
+		BoxHeight:  expandedHeight,
 		Overflow:   true,
 	}
 }

@@ -109,7 +109,7 @@ func newTranslateCmd() *cobra.Command {
 			ocrExt := extractor.NewOCRExtractor(rec)
 
 			trans := translator.New(cfg.OpenAIAPIKey, logger)
-			rend := renderer.NewRenderer(cfg.DataDir, logger)
+			rend := renderer.NewRendererWithFontPaths(cfg.DataDir, cfg.ScriptFontPaths(), logger)
 
 			pipe := pipeline.New(nativeExt, ocrExt, trans, rend, logger)
 
@@ -184,7 +184,7 @@ func newDownloadFontsCmd() *cobra.Command {
 			logger := buildLogger(false)
 			defer func() { _ = logger.Sync() }()
 
-			fm := renderer.NewFontManager(cfg.DataDir)
+			fm := renderer.NewFontManagerWithOverrides(cfg.DataDir, cfg.ScriptFontPaths())
 			return fm.DownloadAllFonts(cmd.Context(), logger)
 		},
 	}
