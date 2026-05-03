@@ -26,6 +26,7 @@ type PageRenderer interface {
 type Pipeline struct {
 	nativeExtractor extractor.Extractor
 	ocrExtractor    extractor.Extractor
+	layoutExtractor extractor.Extractor
 	translator      BlockTranslator
 	renderer        PageRenderer
 	logger          *zap.Logger
@@ -34,6 +35,7 @@ type Pipeline struct {
 func New(
 	nativeExt extractor.Extractor,
 	ocrExt extractor.Extractor,
+	layoutExt extractor.Extractor,
 	trans BlockTranslator,
 	rend PageRenderer,
 	logger *zap.Logger,
@@ -41,6 +43,7 @@ func New(
 	return &Pipeline{
 		nativeExtractor: nativeExt,
 		ocrExtractor:    ocrExt,
+		layoutExtractor: layoutExt,
 		translator:      trans,
 		renderer:        rend,
 		logger:          logger,
@@ -53,45 +56,37 @@ func (p *Pipeline) ProcessPage(ctx context.Context, pageJob *queue.PageJob, docJ
 		zap.String("type", pageJob.PageType),
 	)
 
-	var blocks []domain.TextBlock
+	if p.layoutExtractor == nil {
+		return fmt.Errorf("layout analysis page %d: no layout extractor configured", pageJob.PageNum)
+	}
 
+	layoutBlocks, err := p.layoutExtractor.ExtractPage(ctx, docJob.InputPath, docJob.Password, pageJob.PageNum, docJob.DPI)
+	if err != nil {
+		return fmt.Errorf("layout analysis page %d: %w", pageJob.PageNum, err)
+	}
+
+	var textBlocks []domain.TextBlock
 	if pageJob.PageType == string(domain.PageTypeNative) {
-		nativeBlocks, err := p.nativeExtractor.ExtractPage(ctx, docJob.InputPath, docJob.Password, pageJob.PageNum, docJob.DPI)
+		textBlocks, err = p.nativeExtractor.ExtractPage(ctx, docJob.InputPath, docJob.Password, pageJob.PageNum, docJob.DPI)
 		if err != nil {
 			return fmt.Errorf("native extraction page %d: %w", pageJob.PageNum, err)
 		}
-
-		// Supplement with OCR to catch path-based text (vector banners, etc.)
-		// that native extraction can't see.
-		if p.ocrExtractor != nil {
-			ocrBlocks, err := p.ocrExtractor.ExtractPage(ctx, docJob.InputPath, docJob.Password, pageJob.PageNum, docJob.DPI)
-			if err != nil {
-				p.logger.Debug("supplemental OCR unavailable, using native only",
-					zap.Int("page", pageJob.PageNum),
-					zap.Error(err),
-				)
-			} else {
-				extra := mergeBlocks(nativeBlocks, ocrBlocks)
-				if len(extra) > 0 {
-					p.logger.Info("OCR found additional text blocks",
-						zap.Int("page", pageJob.PageNum),
-						zap.Int("extra", len(extra)),
-					)
-					nativeBlocks = append(nativeBlocks, extra...)
-				}
-			}
-		}
-
-		blocks = nativeBlocks
 	} else {
 		if p.ocrExtractor == nil {
 			return fmt.Errorf("OCR extraction page %d: no OCR extractor configured for scanned page", pageJob.PageNum)
 		}
-		var err error
-		blocks, err = p.ocrExtractor.ExtractPage(ctx, docJob.InputPath, docJob.Password, pageJob.PageNum, docJob.DPI)
+		textBlocks, err = p.ocrExtractor.ExtractPage(ctx, docJob.InputPath, docJob.Password, pageJob.PageNum, docJob.DPI)
 		if err != nil {
 			return fmt.Errorf("OCR extraction page %d: %w", pageJob.PageNum, err)
 		}
+	}
+
+	blocks, unmatched := mergeLayoutBlocks(layoutBlocks, textBlocks)
+	if unmatched > 0 {
+		p.logger.Warn("layout analysis did not classify all text blocks",
+			zap.Int("page", pageJob.PageNum),
+			zap.Int("unmatched", unmatched),
+		)
 	}
 
 	if len(blocks) == 0 {
@@ -126,32 +121,6 @@ func (p *Pipeline) ProcessPage(ctx context.Context, pageJob *queue.PageJob, docJ
 	)
 
 	return nil
-}
-
-// overlapThreshold is the minimum fraction of overlap (by area) for two
-// bounding boxes to be considered duplicates during native+OCR merge.
-const overlapThreshold = 0.3
-
-// mergeBlocks returns OCR blocks that don't significantly overlap with any
-// native block. This captures path-based text (vector banners, decorative
-// headers) that native extraction misses.
-func mergeBlocks(native, ocr []domain.TextBlock) []domain.TextBlock {
-	var extra []domain.TextBlock
-	for _, ob := range ocr {
-		if !overlapsAny(ob, native) {
-			extra = append(extra, ob)
-		}
-	}
-	return extra
-}
-
-func overlapsAny(block domain.TextBlock, others []domain.TextBlock) bool {
-	for _, o := range others {
-		if bboxOverlap(block.BBox, o.BBox) > overlapThreshold {
-			return true
-		}
-	}
-	return false
 }
 
 // bboxOverlap returns the fraction of a's area that overlaps with b.

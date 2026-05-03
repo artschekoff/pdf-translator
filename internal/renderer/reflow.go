@@ -2,6 +2,7 @@ package renderer
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/pdf-translator/pdf-translator/internal/domain"
 )
@@ -77,7 +78,7 @@ func buildSegments(blocks []domain.TextBlock, pageH, pageW float64) []pageSegmen
 	// Separate into paragraph blocks (wide) and label blocks (narrow).
 	var paragraphs []domain.TextBlock
 	for _, b := range blocks {
-		if b.BBox.Width >= minParagraphW {
+		if domain.IsTextualBlockType(b.BlockType) && strings.TrimSpace(b.Text) != "" && b.BBox.Width >= minParagraphW {
 			paragraphs = append(paragraphs, b)
 		}
 	}

@@ -18,6 +18,11 @@ type TextRecognizer interface {
 	Recognize(ctx context.Context, imageData []byte, pageWidth, pageHeight float64, dpi int) ([]domain.TextBlock, error)
 }
 
+// LayoutAnalyzer extracts document layout regions from a page image.
+type LayoutAnalyzer interface {
+	Analyze(ctx context.Context, imageData []byte, pageWidth, pageHeight float64, dpi int) ([]domain.TextBlock, error)
+}
+
 // ClassifyBlock estimates font size from the bounding-box height and picks
 // a block type (title vs text). Shared by all OCR recogniser backends.
 func ClassifyBlock(pdfHeight float64) (fontSize float64, blockType string) {

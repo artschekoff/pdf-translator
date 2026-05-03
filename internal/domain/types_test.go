@@ -18,3 +18,9 @@ func TestBoundingBox(t *testing.T) {
 	assert.Equal(t, 200.0, bbox.Width)
 	assert.Equal(t, 50.0, bbox.Height)
 }
+
+func TestIsTextualBlockType(t *testing.T) {
+	assert.True(t, IsTextualBlockType(BlockTypeText))
+	assert.True(t, IsTextualBlockType(BlockTypeTable))
+	assert.False(t, IsTextualBlockType(BlockTypeImage))
+}

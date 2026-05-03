@@ -107,11 +107,12 @@ func newTranslateCmd() *cobra.Command {
 				rec = recognizer.NewPaddleRecognizer(cfg.PaddleOCRURL, cfg.HTTPTimeout)
 			}
 			ocrExt := extractor.NewOCRExtractor(rec)
+			layoutExt := extractor.NewLayoutExtractor(recognizer.NewPaddleLayoutAnalyzer(cfg.PaddleOCRURL, cfg.HTTPTimeout))
 
 			trans := translator.New(cfg.OpenAIAPIKey, logger)
 			rend := renderer.NewRendererWithFontPaths(cfg.DataDir, cfg.ScriptFontPaths(), logger)
 
-			pipe := pipeline.New(nativeExt, ocrExt, trans, rend, logger)
+			pipe := pipeline.New(nativeExt, ocrExt, layoutExt, trans, rend, logger)
 
 			dispatcher := queue.NewDispatcher(db, cfg, logger)
 			dispatcher.SetProcessor(pipe)

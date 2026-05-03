@@ -37,12 +37,19 @@ const (
 
 // BlockType constants for text block classification.
 const (
-	BlockTypeText   = "text"
-	BlockTypeTitle  = "title"
-	BlockTypeHeader = "header"
-	BlockTypeFooter = "footer"
-	BlockTypeTable  = "table"
+	BlockTypeText    = "text"
+	BlockTypeTitle   = "title"
+	BlockTypeHeader  = "header"
+	BlockTypeFooter  = "footer"
+	BlockTypeCaption = "caption"
+	BlockTypeTable   = "table"
+	BlockTypeImage   = "image"
 )
+
+// IsTextualBlockType reports whether a block type should carry translatable text.
+func IsTextualBlockType(blockType string) bool {
+	return blockType != BlockTypeImage
+}
 
 // OCR engine identifiers.
 const (
