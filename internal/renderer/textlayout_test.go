@@ -52,12 +52,16 @@ func TestFitText_ExpandsBoxHeightForModerateOverflow(t *testing.T) {
 	assert.GreaterOrEqual(t, len(result.Lines), 2)
 }
 
-func TestFitText_PreservesNewlines(t *testing.T) {
+func TestFitText_NormalizesNewlines(t *testing.T) {
+	// PDF line breaks (\n from extraction) must NOT create hard paragraph breaks.
+	// "Line one\nLine two\nLine three" must flow as a single paragraph and
+	// word-wrap naturally within bbox.Width, producing fewer lines than the
+	// number of \n characters.
 	bbox := domain.BoundingBox{X: 0, Y: 0, Width: 200, Height: 100}
 	text := "Line one\nLine two\nLine three"
 	result := FitText(text, bbox, 12)
 
-	assert.GreaterOrEqual(t, len(result.Lines), 3)
+	assert.Less(t, len(result.Lines), 3, "newlines must be collapsed, not treated as paragraph breaks")
 }
 
 func TestWrapText_SingleWord(t *testing.T) {
