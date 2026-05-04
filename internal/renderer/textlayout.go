@@ -30,6 +30,10 @@ func FitText(text string, bbox domain.BoundingBox, originalFontSize float64) Lay
 		originalFontSize = 12
 	}
 
+	// PDF line breaks (\n from mergeLines) are visual/positional, not semantic paragraph
+	// separators. Collapse them to spaces so wrapText can re-flow based on bbox.Width.
+	text = strings.Join(strings.Fields(text), " ")
+
 	fontSize := originalFontSize
 	charWidthRatio := charWidthRatioForText(text)
 

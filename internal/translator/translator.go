@@ -214,10 +214,10 @@ func systemPrompt(sourceLang, targetLang string) string {
 
 Rules:
 - Return ONLY a JSON array of translated strings, one per input block, in the same order.
-- Preserve formatting: line breaks, numbering, bullet points.
+- Preserve formatting: numbering, bullet points. For table blocks, preserve the row/line structure exactly.
 - Do NOT translate proper nouns, code, URLs, or email addresses.
 - Do NOT add explanations, notes, or markdown formatting.
-- For table content, preserve the row/line structure exactly.
+- Output each block as a single continuous paragraph — do NOT insert line breaks.
 - You MUST return exactly the same number of items as the input array.`, from, targetLang)
 }
 
@@ -230,7 +230,8 @@ func singleBlockSystemPrompt(sourceLang, targetLang string) string {
 
 Rules:
 - Return ONLY the translated text, nothing else.
-- Preserve formatting: line breaks, numbering, bullet points.
+- Preserve formatting: numbering, bullet points.
+- Output as a single continuous paragraph — do NOT insert line breaks.
 - Do NOT translate proper nouns, code, URLs, or email addresses.`, from, targetLang)
 }
 
@@ -243,9 +244,15 @@ func buildBatchPrompt(blocks []domain.TextBlock, sourceLang, targetLang string) 
 
 	items := make([]inputBlock, len(blocks))
 	for i, b := range blocks {
+		text := b.Text
+		// Collapse PDF line-boundary \n to spaces for non-table blocks.
+		// Table blocks intentionally preserve row structure via \n.
+		if b.BlockType != domain.BlockTypeTable {
+			text = strings.Join(strings.Fields(text), " ")
+		}
 		items[i] = inputBlock{
 			ID:   i,
-			Text: b.Text,
+			Text: text,
 			Type: b.BlockType,
 		}
 	}
