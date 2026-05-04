@@ -46,15 +46,24 @@ func TestMergeLayoutBlocks_AssignsTextToLayoutRegions(t *testing.T) {
 	}
 
 	blocks, unmatched := mergeLayoutBlocks(layoutBlocks, textBlocks)
-	require.Len(t, blocks, 3)
+
+	// New behaviour: native blocks are kept individually at their original
+	// positions; only BlockType is annotated from the layout. Image blocks are
+	// appended last so buildSegments can detect diagram regions.
+	require.Len(t, blocks, 4) // 3 text blocks (annotated) + 1 image block
 	assert.Zero(t, unmatched)
+
 	assert.Equal(t, domain.BlockTypeTitle, blocks[0].BlockType)
 	assert.Equal(t, "Bitcoin", blocks[0].Text)
+
 	assert.Equal(t, domain.BlockTypeText, blocks[1].BlockType)
-	assert.Contains(t, blocks[1].Text, "A Peer-to-Peer Electronic Cash System")
-	assert.Contains(t, blocks[1].Text, "Satoshi Nakamoto")
-	assert.Equal(t, domain.BlockTypeImage, blocks[2].BlockType)
-	assert.Empty(t, blocks[2].Text)
+	assert.Equal(t, "A Peer-to-Peer Electronic Cash System", blocks[1].Text)
+
+	assert.Equal(t, domain.BlockTypeText, blocks[2].BlockType)
+	assert.Equal(t, "Satoshi Nakamoto", blocks[2].Text)
+
+	assert.Equal(t, domain.BlockTypeImage, blocks[3].BlockType)
+	assert.Empty(t, blocks[3].Text)
 }
 
 func TestMergeLayoutBlocks_PreservesUnmatchedText(t *testing.T) {
