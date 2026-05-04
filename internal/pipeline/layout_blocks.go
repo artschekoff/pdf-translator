@@ -1,18 +1,23 @@
 package pipeline
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/pdf-translator/pdf-translator/internal/domain"
 )
 
+// mergeLayoutBlocks enriches native text blocks with PaddleOCR layout metadata.
+//
+// Old approach: merge all native blocks within a layout region into one block,
+// losing paragraph spacing. New approach: keep each native block at its original
+// position and BBox, annotating it with the matching layout block's BlockType.
+// Image-type layout blocks (figures, charts) are appended as-is so that
+// buildSegments can detect diagram regions.
 func mergeLayoutBlocks(layoutBlocks, textBlocks []domain.TextBlock) ([]domain.TextBlock, int) {
 	if len(layoutBlocks) == 0 {
-		return nil, len(nonEmptyTextBlocks(textBlocks))
+		return nonEmptyTextBlocks(textBlocks), 0
 	}
 
-	assignments := make([][]domain.TextBlock, len(layoutBlocks))
 	textualRegions := make([]int, 0, len(layoutBlocks))
 	for i, block := range layoutBlocks {
 		if domain.IsTextualBlockType(block.BlockType) {
@@ -20,8 +25,9 @@ func mergeLayoutBlocks(layoutBlocks, textBlocks []domain.TextBlock) ([]domain.Te
 		}
 	}
 
+	var result []domain.TextBlock
 	unmatched := 0
-	var fallback []domain.TextBlock
+
 	for _, tb := range textBlocks {
 		if strings.TrimSpace(tb.Text) == "" {
 			continue
@@ -39,34 +45,24 @@ func mergeLayoutBlocks(layoutBlocks, textBlocks []domain.TextBlock) ([]domain.Te
 
 		if bestIdx == -1 {
 			unmatched++
-			fallback = append(fallback, tb)
+			result = append(result, tb)
 			continue
 		}
-		assignments[bestIdx] = append(assignments[bestIdx], tb)
+
+		// Annotate with layout metadata but preserve the native block's position.
+		annotated := tb
+		annotated.BlockType = layoutBlocks[bestIdx].BlockType
+		result = append(result, annotated)
 	}
 
-	merged := make([]domain.TextBlock, 0, len(layoutBlocks)+len(fallback))
-	for i, lb := range layoutBlocks {
+	// Append image-type layout blocks (no text, but needed for diagram detection).
+	for _, lb := range layoutBlocks {
 		if !domain.IsTextualBlockType(lb.BlockType) {
-			merged = append(merged, lb)
-			continue
+			result = append(result, lb)
 		}
-
-		if len(assignments[i]) == 0 {
-			continue
-		}
-
-		sortTextBlocks(assignments[i])
-		lb.Text = joinTextBlocks(assignments[i])
-		if fontSize := averageFontSize(assignments[i]); fontSize > 0 {
-			lb.FontSize = fontSize
-		}
-		lb.FontName = firstFontName(assignments[i])
-		merged = append(merged, lb)
 	}
 
-	merged = append(merged, fallback...)
-	return merged, unmatched
+	return result, unmatched
 }
 
 func nonEmptyTextBlocks(blocks []domain.TextBlock) []domain.TextBlock {
@@ -98,51 +94,4 @@ func bboxContainsCenter(outer, inner domain.BoundingBox) bool {
 	cx := inner.X + inner.Width/2
 	cy := inner.Y + inner.Height/2
 	return cx >= outer.X && cx <= outer.X+outer.Width && cy >= outer.Y && cy <= outer.Y+outer.Height
-}
-
-func sortTextBlocks(blocks []domain.TextBlock) {
-	sort.Slice(blocks, func(i, j int) bool {
-		topI := blocks[i].BBox.Y + blocks[i].BBox.Height
-		topJ := blocks[j].BBox.Y + blocks[j].BBox.Height
-		if topI == topJ {
-			return blocks[i].BBox.X < blocks[j].BBox.X
-		}
-		return topI > topJ
-	})
-}
-
-func joinTextBlocks(blocks []domain.TextBlock) string {
-	parts := make([]string, 0, len(blocks))
-	for _, block := range blocks {
-		text := strings.TrimSpace(block.Text)
-		if text != "" {
-			parts = append(parts, text)
-		}
-	}
-	return strings.Join(parts, "\n")
-}
-
-func averageFontSize(blocks []domain.TextBlock) float64 {
-	total := 0.0
-	count := 0
-	for _, block := range blocks {
-		if block.FontSize <= 0 {
-			continue
-		}
-		total += block.FontSize
-		count++
-	}
-	if count == 0 {
-		return 0
-	}
-	return total / float64(count)
-}
-
-func firstFontName(blocks []domain.TextBlock) string {
-	for _, block := range blocks {
-		if block.FontName != "" {
-			return block.FontName
-		}
-	}
-	return ""
 }
