@@ -1,61 +1,60 @@
 package pipeline
 
 import (
+	"math"
+	"sort"
 	"strings"
 
 	"github.com/pdf-translator/pdf-translator/internal/domain"
 )
 
-// mergeLayoutBlocks enriches native text blocks with PaddleOCR layout metadata.
-//
-// Old approach: merge all native blocks within a layout region into one block,
-// losing paragraph spacing. New approach: keep each native block at its original
-// position and BBox, annotating it with the matching layout block's BlockType.
-// Image-type layout blocks (figures, charts) are appended as-is so that
-// buildSegments can detect diagram regions.
+// mergeLayoutBlocks groups individual text lines into one block per layout region.
+// Lines whose center falls within a textual region are collected, sorted into
+// reading order, and merged into a single TextBlock. Unmatched lines are kept
+// as-is. Image-type regions are appended so that buildSegments can detect
+// diagram regions.
 func mergeLayoutBlocks(layoutBlocks, textBlocks []domain.TextBlock) ([]domain.TextBlock, int) {
 	if len(layoutBlocks) == 0 {
 		return nonEmptyTextBlocks(textBlocks), 0
 	}
 
-	textualRegions := make([]int, 0, len(layoutBlocks))
-	for i, block := range layoutBlocks {
-		if domain.IsTextualBlockType(block.BlockType) {
-			textualRegions = append(textualRegions, i)
-		}
-	}
-
+	assigned := make([]bool, len(textBlocks))
 	var result []domain.TextBlock
-	unmatched := 0
 
-	for _, tb := range textBlocks {
-		if strings.TrimSpace(tb.Text) == "" {
+	for _, region := range layoutBlocks {
+		if !domain.IsTextualBlockType(region.BlockType) {
 			continue
 		}
 
-		bestIdx := -1
-		bestScore := 0.0
-		for _, idx := range textualRegions {
-			score := layoutAssignmentScore(tb.BBox, layoutBlocks[idx].BBox)
-			if score > bestScore {
-				bestScore = score
-				bestIdx = idx
+		var regionLines []domain.TextBlock
+		for i, tb := range textBlocks {
+			if strings.TrimSpace(tb.Text) == "" {
+				continue
+			}
+			cx := tb.BBox.X + tb.BBox.Width/2
+			cy := tb.BBox.Y + tb.BBox.Height/2
+			if cx >= region.BBox.X && cx <= region.BBox.X+region.BBox.Width &&
+				cy >= region.BBox.Y && cy <= region.BBox.Y+region.BBox.Height {
+				regionLines = append(regionLines, tb)
+				assigned[i] = true
 			}
 		}
 
-		if bestIdx == -1 {
-			unmatched++
-			result = append(result, tb)
+		if len(regionLines) == 0 {
 			continue
 		}
 
-		// Annotate with layout metadata but preserve the native block's position.
-		annotated := tb
-		annotated.BlockType = layoutBlocks[bestIdx].BlockType
-		result = append(result, annotated)
+		result = append(result, mergeTextLines(regionLines, region.BlockType))
 	}
 
-	// Append image-type layout blocks (no text, but needed for diagram detection).
+	unmatched := 0
+	for i, tb := range textBlocks {
+		if !assigned[i] && strings.TrimSpace(tb.Text) != "" {
+			unmatched++
+			result = append(result, tb)
+		}
+	}
+
 	for _, lb := range layoutBlocks {
 		if !domain.IsTextualBlockType(lb.BlockType) {
 			result = append(result, lb)
@@ -63,6 +62,55 @@ func mergeLayoutBlocks(layoutBlocks, textBlocks []domain.TextBlock) ([]domain.Te
 	}
 
 	return result, unmatched
+}
+
+// mergeTextLines sorts lines into reading order and joins them into one TextBlock.
+func mergeTextLines(lines []domain.TextBlock, blockType string) domain.TextBlock {
+	sort.Slice(lines, func(i, j int) bool {
+		yi, yj := lines[i].BBox.Y, lines[j].BBox.Y
+		if math.Abs(yi-yj) > 2 {
+			return yi > yj
+		}
+		return lines[i].BBox.X < lines[j].BBox.X
+	})
+
+	minX := lines[0].BBox.X
+	minY := lines[0].BBox.Y
+	maxX := lines[0].BBox.X + lines[0].BBox.Width
+	maxY := lines[0].BBox.Y + lines[0].BBox.Height
+
+	var texts []string
+	var totalFontSize float64
+	for _, l := range lines {
+		texts = append(texts, l.Text)
+		totalFontSize += l.FontSize
+		if l.BBox.X < minX {
+			minX = l.BBox.X
+		}
+		if l.BBox.Y < minY {
+			minY = l.BBox.Y
+		}
+		if l.BBox.X+l.BBox.Width > maxX {
+			maxX = l.BBox.X + l.BBox.Width
+		}
+		if l.BBox.Y+l.BBox.Height > maxY {
+			maxY = l.BBox.Y + l.BBox.Height
+		}
+	}
+
+	return domain.TextBlock{
+		PageNum: lines[0].PageNum,
+		BBox: domain.BoundingBox{
+			X:      minX,
+			Y:      minY,
+			Width:  maxX - minX,
+			Height: maxY - minY,
+		},
+		Text:      strings.Join(texts, " "),
+		FontSize:  totalFontSize / float64(len(lines)),
+		FontName:  lines[0].FontName,
+		BlockType: blockType,
+	}
 }
 
 func nonEmptyTextBlocks(blocks []domain.TextBlock) []domain.TextBlock {
@@ -73,25 +121,4 @@ func nonEmptyTextBlocks(blocks []domain.TextBlock) []domain.TextBlock {
 		}
 	}
 	return filtered
-}
-
-func layoutAssignmentScore(textBox, regionBox domain.BoundingBox) float64 {
-	overlap := bboxOverlap(textBox, regionBox)
-	if overlap > 0 {
-		score := overlap
-		if bboxContainsCenter(regionBox, textBox) {
-			score += 1
-		}
-		return score
-	}
-	if bboxContainsCenter(regionBox, textBox) {
-		return 0.5
-	}
-	return 0
-}
-
-func bboxContainsCenter(outer, inner domain.BoundingBox) bool {
-	cx := inner.X + inner.Width/2
-	cy := inner.Y + inner.Height/2
-	return cx >= outer.X && cx <= outer.X+outer.Width && cy >= outer.Y && cy <= outer.Y+outer.Height
 }

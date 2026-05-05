@@ -34,7 +34,7 @@ func (e *NativeExtractor) ExtractPage(ctx context.Context, inputPath string, pas
 		return nil, fmt.Errorf("extracting text lines from page %d: %w", pageNum, err)
 	}
 
-	converted := make([]textLine, 0, len(lines))
+	blocks := make([]domain.TextBlock, 0, len(lines))
 	for _, l := range lines {
 		if len(l.Spans) == 0 {
 			continue
@@ -59,18 +59,20 @@ func (e *NativeExtractor) ExtractPage(ctx context.Context, inputPath string, pas
 		// effective size from the actual rendered span width.
 		fontSize := effectiveFontSize(l.Spans)
 
-		converted = append(converted, textLine{
-			Text:     l.Text,
-			X:        minX,
-			Y:        l.Y,
-			Width:    maxX - minX,
-			Height:   fontSize * 1.2,
-			FontSize: fontSize,
-			FontName: fontName,
+		blocks = append(blocks, domain.TextBlock{
+			PageNum: pageNum,
+			BBox: domain.BoundingBox{
+				X:      minX,
+				Y:      l.Y,
+				Width:  maxX - minX,
+				Height: fontSize * 1.2,
+			},
+			Text:      l.Text,
+			FontSize:  fontSize,
+			FontName:  fontName,
+			BlockType: domain.BlockTypeText,
 		})
 	}
-
-	blocks := groupLines(converted, pageNum)
 	return blocks, nil
 }
 
