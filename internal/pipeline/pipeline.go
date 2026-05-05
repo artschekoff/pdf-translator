@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"math"
 	"path/filepath"
 
 	"github.com/pdf-translator/pdf-translator/internal/domain"
@@ -123,20 +122,3 @@ func (p *Pipeline) ProcessPage(ctx context.Context, pageJob *queue.PageJob, docJ
 	return nil
 }
 
-// bboxOverlap returns the fraction of a's area that overlaps with b.
-func bboxOverlap(a, b domain.BoundingBox) float64 {
-	ax1, ay1 := a.X, a.Y
-	ax2, ay2 := a.X+a.Width, a.Y+a.Height
-	bx1, by1 := b.X, b.Y
-	bx2, by2 := b.X+b.Width, b.Y+b.Height
-
-	ox := math.Max(0, math.Min(ax2, bx2)-math.Max(ax1, bx1))
-	oy := math.Max(0, math.Min(ay2, by2)-math.Max(ay1, by1))
-	overlap := ox * oy
-
-	aArea := a.Width * a.Height
-	if aArea <= 0 {
-		return 0
-	}
-	return overlap / aArea
-}

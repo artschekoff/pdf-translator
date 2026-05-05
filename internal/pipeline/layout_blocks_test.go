@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMergeLayoutBlocks_AssignsTextToLayoutRegions(t *testing.T) {
+func TestMergeLayoutBlocks_GroupsLinesIntoRegions(t *testing.T) {
 	layoutBlocks := []domain.TextBlock{
 		{
 			BBox:      domain.BoundingBox{X: 0, Y: 500, Width: 300, Height: 30},
@@ -47,23 +47,19 @@ func TestMergeLayoutBlocks_AssignsTextToLayoutRegions(t *testing.T) {
 
 	blocks, unmatched := mergeLayoutBlocks(layoutBlocks, textBlocks)
 
-	// New behaviour: native blocks are kept individually at their original
-	// positions; only BlockType is annotated from the layout. Image blocks are
-	// appended last so buildSegments can detect diagram regions.
-	require.Len(t, blocks, 4) // 3 text blocks (annotated) + 1 image block
+	// One merged block per layout region + 1 image block.
+	require.Len(t, blocks, 3)
 	assert.Zero(t, unmatched)
 
 	assert.Equal(t, domain.BlockTypeTitle, blocks[0].BlockType)
 	assert.Equal(t, "Bitcoin", blocks[0].Text)
 
 	assert.Equal(t, domain.BlockTypeText, blocks[1].BlockType)
-	assert.Equal(t, "A Peer-to-Peer Electronic Cash System", blocks[1].Text)
+	// Lines sorted top-to-bottom (Y=380 before Y=360), joined with space.
+	assert.Equal(t, "A Peer-to-Peer Electronic Cash System Satoshi Nakamoto", blocks[1].Text)
 
-	assert.Equal(t, domain.BlockTypeText, blocks[2].BlockType)
-	assert.Equal(t, "Satoshi Nakamoto", blocks[2].Text)
-
-	assert.Equal(t, domain.BlockTypeImage, blocks[3].BlockType)
-	assert.Empty(t, blocks[3].Text)
+	assert.Equal(t, domain.BlockTypeImage, blocks[2].BlockType)
+	assert.Empty(t, blocks[2].Text)
 }
 
 func TestMergeLayoutBlocks_PreservesUnmatchedText(t *testing.T) {
