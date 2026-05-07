@@ -25,6 +25,14 @@ func mergeLayoutBlocks(layoutBlocks, textBlocks []domain.TextBlock) ([]domain.Te
 		if !domain.IsTextualBlockType(region.BlockType) {
 			continue
 		}
+		// Skip super-regions: layout blocks whose BBox contains the center of
+		// another layout block. These are grouping containers (e.g. "reference"
+		// enclosing individual "reference_content" entries) — processing them
+		// would create an extra block that overlaps with the sub-region blocks,
+		// causing doubled text in the renderer.
+		if containsOtherRegionCenter(region.BBox, layoutBlocks) {
+			continue
+		}
 
 		var regionLines []domain.TextBlock
 		for i, tb := range textBlocks {
@@ -134,6 +142,25 @@ func mergeTextLines(lines []domain.TextBlock, blockType string) domain.TextBlock
 		FontName:  lines[0].FontName,
 		BlockType: blockType,
 	}
+}
+
+// containsOtherRegionCenter returns true when outer's BBox contains the center
+// of any OTHER block in the slice. Such a region is a "super-region" container
+// (e.g. a "reference" block enclosing eight "reference_content" blocks) and
+// should be skipped so that only the inner leaf regions produce merged blocks.
+func containsOtherRegionCenter(outer domain.BoundingBox, all []domain.TextBlock) bool {
+	for _, other := range all {
+		cx := other.BBox.X + other.BBox.Width/2
+		cy := other.BBox.Y + other.BBox.Height/2
+		if cx == outer.X+outer.Width/2 && cy == outer.Y+outer.Height/2 {
+			continue // same region (center coincides exactly)
+		}
+		if cx > outer.X && cx < outer.X+outer.Width &&
+			cy > outer.Y && cy < outer.Y+outer.Height {
+			return true
+		}
+	}
+	return false
 }
 
 func nonEmptyTextBlocks(blocks []domain.TextBlock) []domain.TextBlock {
