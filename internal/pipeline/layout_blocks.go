@@ -47,12 +47,35 @@ func mergeLayoutBlocks(layoutBlocks, textBlocks []domain.TextBlock) ([]domain.Te
 		result = append(result, mergeTextLines(regionLines, region.BlockType))
 	}
 
+	// Collect non-textual regions (formula, image, etc.) to exclude text lines
+	// that fall within them — those lines belong to the formula/figure and must
+	// not be translated.
+	var nonTextualRegions []domain.BoundingBox
+	for _, lb := range layoutBlocks {
+		if !domain.IsTextualBlockType(lb.BlockType) {
+			nonTextualRegions = append(nonTextualRegions, lb.BBox)
+		}
+	}
+
 	unmatched := 0
 	for i, tb := range textBlocks {
-		if !assigned[i] && strings.TrimSpace(tb.Text) != "" {
-			unmatched++
-			result = append(result, tb)
+		if assigned[i] || strings.TrimSpace(tb.Text) == "" {
+			continue
 		}
+		cx := tb.BBox.X + tb.BBox.Width/2
+		cy := tb.BBox.Y + tb.BBox.Height/2
+		inFormula := false
+		for _, r := range nonTextualRegions {
+			if cx >= r.X && cx <= r.X+r.Width && cy >= r.Y && cy <= r.Y+r.Height {
+				inFormula = true
+				break
+			}
+		}
+		if inFormula {
+			continue
+		}
+		unmatched++
+		result = append(result, tb)
 	}
 
 	for _, lb := range layoutBlocks {

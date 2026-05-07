@@ -124,7 +124,7 @@ func MapPaddleLayoutLabel(label string) string {
 		return domain.BlockTypeCaption
 	case "table":
 		return domain.BlockTypeTable
-	case "image", "figure", "chart", "seal", "formula":
+	case "image", "figure", "chart", "seal", "formula", "equation":
 		return domain.BlockTypeImage
 	default:
 		return domain.BlockTypeText
