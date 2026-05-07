@@ -76,7 +76,7 @@ def _normalize_coordinate(raw: Any) -> list[float]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _ocr, _layout, _ready
+    global _ocr, _layout, _formula_pipeline, _ready
     logger.info("Loading PaddleOCR 3.x models (lang=%s, device=%s)...", OCR_LANG, PADDLE_DEVICE)
     _ocr = PaddleOCR(
         lang=OCR_LANG,
@@ -156,17 +156,21 @@ async def layout(image: UploadFile = File(...)):
     raw_regions = result.get("boxes") or []
 
     regions = []
+    label_counts: dict[str, int] = {}
     for raw in raw_regions:
         coordinate = _normalize_coordinate(raw.get("coordinate") or raw.get("bbox") or [])
         if len(coordinate) != 4:
             continue
+        label = raw.get("label") or raw.get("type") or "text"
+        label_counts[label] = label_counts.get(label, 0) + 1
         regions.append(
             {
-                "label": raw.get("label") or raw.get("type") or "text",
+                "label": label,
                 "score": float(raw.get("score") or raw.get("prob") or 0.0),
                 "coordinate": coordinate,
             }
         )
+    logger.info("layout labels: %s", label_counts)
 
     return JSONResponse(
         {
