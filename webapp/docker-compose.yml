@@ -1,0 +1,85 @@
+services:
+  webapp-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: webapp
+      POSTGRES_USER: webapp
+      POSTGRES_PASSWORD: webapp
+    volumes:
+      - webapp-pg:/var/lib/postgresql/data
+    networks:
+      - ocr-net
+
+  webapp-backend:
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+    environment:
+      DATABASE_URL: postgres://webapp:webapp@webapp-db:5432/webapp
+      REDIS_URL: redis://redis:6379/1
+      AUTH_SERVICE_URL: http://auth-service:8002
+      UPLOADS_DIR: /data/uploads
+      EXPORTS_DIR: /data/exports
+    env_file: .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - webapp-uploads:/data/uploads
+      - webapp-exports:/data/exports
+    depends_on:
+      - webapp-db
+    networks:
+      - ocr-net
+    restart: unless-stopped
+
+  # Scale this service to add OCR/AI workers:
+  #   docker compose up --scale webapp-worker=3
+  webapp-worker:
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+    command: ["/usr/local/bin/worker"]
+    environment:
+      DATABASE_URL: postgres://webapp:webapp@webapp-db:5432/webapp
+      REDIS_URL: redis://redis:6379/1
+      DOCLING_SERVICE_URL: http://paddleocr:8000
+    env_file: .env
+    volumes:
+      - webapp-uploads:/data/uploads
+    depends_on:
+      - webapp-db
+    networks:
+      - ocr-net
+    restart: unless-stopped
+
+  webapp-frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080/api
+      NEXT_PUBLIC_AUTH_URL: http://localhost:8002
+    depends_on:
+      - webapp-backend
+    networks:
+      - ocr-net
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - webapp-redis:/data
+    networks:
+      - ocr-net
+
+volumes:
+  webapp-pg:
+  webapp-uploads:
+  webapp-exports:
+  webapp-redis:
+
+networks:
+  ocr-net:
+    external: true
+    name: pdf-translator_ocr-net

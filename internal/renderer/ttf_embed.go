@@ -344,6 +344,25 @@ func (f *TTFFont) HasGlyph(r rune) bool {
 	return ok
 }
 
+// TextWidth returns the approximate advance width of text in points at fontSize.
+func (f *TTFFont) TextWidth(text string, fontSize float64) float64 {
+	var total float64
+	defaultWidth := float64(f.unitsPerEm) * 0.5
+	for _, r := range text {
+		gid, ok := f.glyphMap[r]
+		if !ok {
+			total += defaultWidth
+			continue
+		}
+		if int(gid) < len(f.glyphWidths) {
+			total += float64(f.glyphWidths[gid])
+		} else {
+			total += defaultWidth
+		}
+	}
+	return total / float64(f.unitsPerEm) * fontSize
+}
+
 // EncodeTextHex converts a Unicode string to uppercase hex-encoded GlyphIDs
 // for use as a PDF <hex-string> with a Type0 Identity-H encoded font.
 func (f *TTFFont) EncodeTextHex(text string) string {

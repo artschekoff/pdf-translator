@@ -217,6 +217,7 @@ func (d *Dispatcher) findOrCreateDocumentJob(ctx context.Context, req *domain.Tr
 		TempDir:    tempDir,
 		DPI:        req.DPI,
 		Password:   req.Password,
+		KeepOriginal: req.KeepOriginal,
 		Status:     JobStatusRunning,
 	}
 

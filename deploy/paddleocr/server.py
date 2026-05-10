@@ -1,14 +1,30 @@
+import base64
 import io
+import json
 import logging
 import os
+import tempfile
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
-from fastapi import FastAPI, File, UploadFile
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.document import ImageRefMode
+from docling.datamodel.pipeline_options import (
+    EasyOcrOptions,
+    PdfPipelineOptions,
+    RapidOcrOptions,
+    TableFormerMode,
+    TableStructureOptions,
+    TesseractOcrOptions,
+)
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image
 from paddleocr import LayoutDetection, PaddleOCR
+from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -178,3 +194,56 @@ async def layout(image: UploadFile = File(...)):
             "regions": regions,
         }
     )
+
+
+class ConvertSettings(BaseModel):
+    engine: str = "rapidocr"
+    lang: list[str] = ["en"]
+    do_ocr: bool = True
+    do_table_structure: bool = True
+    table_mode: str = "fast"
+    generate_picture_images: bool = True
+    images_scale: float = 2.0
+
+
+@app.post("/convert")
+async def convert_pdf(file: UploadFile = File(...), settings: str = Form(default="{}")):
+    s = ConvertSettings(**json.loads(settings))
+
+    opts = PdfPipelineOptions(
+        do_ocr=s.do_ocr,
+        do_table_structure=s.do_table_structure,
+        generate_picture_images=s.generate_picture_images,
+        images_scale=s.images_scale,
+    )
+    if s.do_table_structure:
+        mode = TableFormerMode.ACCURATE if s.table_mode == "accurate" else TableFormerMode.FAST
+        opts.table_structure_options = TableStructureOptions(mode=mode)
+    if s.do_ocr:
+        if s.engine == "easyocr":
+            opts.ocr_options = EasyOcrOptions(lang=s.lang)
+        elif s.engine == "tesseract":
+            opts.ocr_options = TesseractOcrOptions(lang=s.lang[0] if s.lang else "eng")
+        else:
+            opts.ocr_options = RapidOcrOptions()
+
+    converter = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)})
+
+    with tempfile.TemporaryDirectory() as tmp:
+        pdf_path = Path(tmp) / "input.pdf"
+        pdf_path.write_bytes(await file.read())
+        images_dir = Path(tmp) / "images"
+        images_dir.mkdir()
+
+        result = converter.convert(str(pdf_path))
+        doc = result.document
+
+        doc.save_as_markdown(Path(tmp) / "out.md", image_mode=ImageRefMode.REFERENCED, artifacts_dir=images_dir)
+        markdown = (Path(tmp) / "out.md").read_text()
+        markdown = markdown.replace(str(images_dir) + "/", "")
+
+        images = {}
+        for img_file in images_dir.glob("*.png"):
+            images[img_file.name] = base64.b64encode(img_file.read_bytes()).decode()
+
+        return {"markdown": markdown, "images": images, "pages": len(doc.pages)}
