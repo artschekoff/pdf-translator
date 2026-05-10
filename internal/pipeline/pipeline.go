@@ -18,7 +18,7 @@ type BlockTranslator interface {
 
 // PageRenderer renders a translated page to a single-page PDF.
 type PageRenderer interface {
-	RenderPage(ctx context.Context, inputPath string, password string, pageNum int, blocks []domain.TextBlock, targetLang string, outputPath string) error
+	RenderPage(ctx context.Context, inputPath string, password string, pageNum int, blocks []domain.TextBlock, targetLang string, keepOriginal bool, outputPath string) error
 }
 
 // Pipeline implements queue.PageProcessor by wiring extract -> translate -> render.
@@ -91,7 +91,7 @@ func (p *Pipeline) ProcessPage(ctx context.Context, pageJob *queue.PageJob, docJ
 	if len(blocks) == 0 {
 		p.logger.Info("no text blocks found, copying page as-is", zap.Int("page", pageJob.PageNum))
 		outputPath := filepath.Join(docJob.TempDir, fmt.Sprintf("page_%04d.pdf", pageJob.PageNum))
-		return p.renderer.RenderPage(ctx, docJob.InputPath, docJob.Password, pageJob.PageNum, nil, docJob.TargetLang, outputPath)
+		return p.renderer.RenderPage(ctx, docJob.InputPath, docJob.Password, pageJob.PageNum, nil, docJob.TargetLang, docJob.KeepOriginal, outputPath)
 	}
 
 	if ctx.Err() != nil {
@@ -110,7 +110,7 @@ func (p *Pipeline) ProcessPage(ctx context.Context, pageJob *queue.PageJob, docJ
 
 	// Render
 	outputPath := filepath.Join(docJob.TempDir, fmt.Sprintf("page_%04d.pdf", pageJob.PageNum))
-	if err := p.renderer.RenderPage(ctx, docJob.InputPath, docJob.Password, pageJob.PageNum, translated, docJob.TargetLang, outputPath); err != nil {
+	if err := p.renderer.RenderPage(ctx, docJob.InputPath, docJob.Password, pageJob.PageNum, translated, docJob.TargetLang, docJob.KeepOriginal, outputPath); err != nil {
 		return fmt.Errorf("rendering page %d: %w", pageJob.PageNum, err)
 	}
 
