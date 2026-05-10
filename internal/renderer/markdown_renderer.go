@@ -2,8 +2,15 @@ package renderer
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
+	"image"
+	"image/jpeg"
+	_ "image/jpeg"
+	"image/png"
+	_ "image/png"
 	"os"
 	"regexp"
 	"strconv"
@@ -78,16 +85,42 @@ func (r *MarkdownRenderer) RenderMarkdown(ctx context.Context, markdown, targetL
 	var pageRefs []pdf.Ref
 	for _, pg := range pages {
 		contentRef := w.AllocRef()
-		if err := w.WriteStream(contentRef, pdf.Dict{}, pg); err != nil {
+		if err := w.WriteStream(contentRef, pdf.Dict{}, pg.stream); err != nil {
 			return fmt.Errorf("writing page stream: %w", err)
 		}
+
+		resources := pdf.Dict{"Font": fontResources}
+		if len(pg.images) > 0 {
+			xObjects := pdf.Dict{}
+			for _, img := range pg.images {
+				imgRef := w.AllocRef()
+				if err := w.WriteObject(imgRef, &pdf.Stream{
+					Dict: pdf.Dict{
+						"Type":             pdf.Name("XObject"),
+						"Subtype":          pdf.Name("Image"),
+						"Width":            img.width,
+						"Height":           img.height,
+						"ColorSpace":       pdf.Name("DeviceRGB"),
+						"BitsPerComponent": 8,
+						"Filter":           pdf.Name("DCTDecode"),
+						"Length":           len(img.jpegData),
+					},
+					Data: img.jpegData,
+				}); err != nil {
+					return fmt.Errorf("writing image stream: %w", err)
+				}
+				xObjects[pdf.Name(img.name)] = imgRef
+			}
+			resources["XObject"] = xObjects
+		}
+
 		pageRef := w.AllocRef()
 		if err := w.WriteObject(pageRef, pdf.Dict{
 			"Type":      pdf.Name("Page"),
 			"Parent":    pagesRef,
 			"MediaBox":  pdf.Array{0, 0, mdPageW, mdPageH},
 			"Contents":  contentRef,
-			"Resources": pdf.Dict{"Font": fontResources},
+			"Resources": resources,
 		}); err != nil {
 			return fmt.Errorf("writing page dict: %w", err)
 		}
@@ -140,12 +173,29 @@ type mdElement struct {
 	isTranslation bool
 	isTable       bool
 	tableRows     [][]string
+	isImage       bool
+	imageJPEG     []byte
+	imageW        int
+	imageH        int
+}
+
+type mdImageResource struct {
+	name     string // "Im0", "Im1", etc. — unique within a page
+	width    int
+	height   int
+	jpegData []byte
+}
+
+type mdPageContent struct {
+	stream []byte
+	images []mdImageResource
 }
 
 var (
-	mdHeadingRE = regexp.MustCompile(`^(#{1,6})\s+(.*)`)
-	mdHRRE      = regexp.MustCompile(`^(-{3,}|\*{3,}|_{3,})$`)
-	mdImgRE     = regexp.MustCompile(`<!--\s*(?:IMG_\d+|image)\s*-->|!\[[^\]]*\]\([^)]*\)`)
+	mdHeadingRE   = regexp.MustCompile(`^(#{1,6})\s+(.*)`)
+	mdHRRE        = regexp.MustCompile(`^(-{3,}|\*{3,}|_{3,})$`)
+	mdImgRE       = regexp.MustCompile(`<!--\s*(?:IMG_\d+|image)\s*-->|!\[[^\]]*\]\([^)]*\)`)
+	mdDataImageRE = regexp.MustCompile(`^!\[[^\]]*\]\(data:image/(jpeg|png);base64,([A-Za-z0-9+/=\r\n]+)\)$`)
 )
 
 var mdTransMarkerRE = regexp.MustCompile(`^<!--\s*TRANS\s*-->$`)
@@ -179,7 +229,7 @@ func parseTableRow(line string) []string {
 func parseMDElements(md string) []mdElement {
 	var elems []mdElement
 	scanner := bufio.NewScanner(strings.NewReader(md))
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 20*1024*1024), 20*1024*1024)
 	var para strings.Builder
 	var tableLines []string
 	nextIsTranslation := false
@@ -245,6 +295,21 @@ func parseMDElements(md string) []mdElement {
 			flushTable()
 		}
 
+		// Embedded image: ![alt](data:image/jpeg;base64,...) or .../png;base64,...
+		if m := mdDataImageRE.FindStringSubmatch(trimmed); m != nil {
+			flush()
+			format := m[1]
+			b64 := strings.TrimSpace(m[2])
+			rawData, err := base64.StdEncoding.DecodeString(b64)
+			if err == nil {
+				jpegData, iw, ih, err := toJPEGImage(rawData, format)
+				if err == nil && iw > 0 && ih > 0 {
+					elems = append(elems, mdElement{isImage: true, imageJPEG: jpegData, imageW: iw, imageH: ih})
+				}
+			}
+			continue
+		}
+
 		if m := mdHeadingRE.FindStringSubmatch(line); m != nil {
 			flush()
 			isTransl := nextIsTranslation
@@ -289,15 +354,40 @@ func parseMDElements(md string) []mdElement {
 	return elems
 }
 
-func layoutMDPages(elems []mdElement, ttf *TTFFont, hasTTF bool, pageW, pageH, mL, mR, mT, mB float64, cr, cg, cb float64) [][]byte {
+// toJPEGImage decodes rawData (JPEG or PNG) and returns JPEG bytes with dimensions.
+// PNG images are converted to JPEG; JPEG images are returned as-is.
+func toJPEGImage(rawData []byte, format string) (jpegData []byte, w, h int, err error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(rawData))
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("decoding image config: %w", err)
+	}
+	if format == "jpeg" {
+		return rawData, cfg.Width, cfg.Height, nil
+	}
+	// PNG → decode and re-encode as JPEG (JPEG doesn't support transparency;
+	// transparent pixels will appear black, which is acceptable for documents).
+	img, err := png.Decode(bytes.NewReader(rawData))
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("decoding PNG: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
+		return nil, 0, 0, fmt.Errorf("encoding JPEG: %w", err)
+	}
+	return buf.Bytes(), cfg.Width, cfg.Height, nil
+}
+
+func layoutMDPages(elems []mdElement, ttf *TTFFont, hasTTF bool, pageW, pageH, mL, mR, mT, mB float64, cr, cg, cb float64) []mdPageContent {
 	textW := pageW - mL - mR
-	var pages [][]byte
+	var pages []mdPageContent
 	var buf strings.Builder
+	var curImages []mdImageResource
 	curY := mT
 
 	newPage := func() {
 		if buf.Len() > 0 {
-			pages = append(pages, []byte(buf.String()))
+			pages = append(pages, mdPageContent{stream: []byte(buf.String()), images: curImages})
+			curImages = nil
 		}
 		buf.Reset()
 		curY = mT
@@ -333,6 +423,37 @@ func layoutMDPages(elems []mdElement, ttf *TTFFont, hasTTF bool, pageW, pageH, m
 			}
 			drawHR(curY)
 			curY += mdBodySize * mdLineSpacing
+			continue
+		}
+
+		if el.isImage && len(el.imageJPEG) > 0 {
+			dispW := float64(el.imageW)
+			dispH := float64(el.imageH)
+			if dispW > textW {
+				scale := textW / dispW
+				dispW = textW
+				dispH *= scale
+			}
+			maxH := pageH - mT - mB
+			if dispH > maxH {
+				scale := maxH / dispH
+				dispH = maxH
+				dispW *= scale
+			}
+			if curY+dispH > pageH-mB && curY > mT {
+				newPage()
+			}
+			imgName := fmt.Sprintf("Im%d", len(curImages))
+			curImages = append(curImages, mdImageResource{
+				name:     imgName,
+				width:    el.imageW,
+				height:   el.imageH,
+				jpegData: el.imageJPEG,
+			})
+			pdfY := pageH - curY - dispH
+			fmt.Fprintf(&buf, "q %.3f 0 0 %.3f %.3f %.3f cm /%s Do Q\n",
+				dispW, dispH, mL, pdfY, imgName)
+			curY += dispH + mdBodySize*mdLineSpacing*0.5
 			continue
 		}
 
@@ -410,7 +531,7 @@ func layoutMDPages(elems []mdElement, ttf *TTFFont, hasTTF bool, pageW, pageH, m
 	}
 
 	if buf.Len() > 0 {
-		pages = append(pages, []byte(buf.String()))
+		pages = append(pages, mdPageContent{stream: []byte(buf.String()), images: curImages})
 	}
 	return pages
 }

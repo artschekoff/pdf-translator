@@ -184,7 +184,7 @@ func (c *Client) buildMultipart(pdfPath string, req ConvertRequest) (*bytes.Buff
 	for field, val := range map[string]string{
 		"do_ocr":             boolStr(req.DoOcr),
 		"do_table_structure": boolStr(req.DoTableStructure),
-		"image_export_mode":  "placeholder",
+		"image_export_mode":  "embedded",
 		"to_formats":         "md",
 	} {
 		if err := w.WriteField(field, val); err != nil {
