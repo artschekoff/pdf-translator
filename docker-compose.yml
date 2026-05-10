@@ -32,6 +32,21 @@ services:
     networks:
       - ocr-net
 
+  docling:
+    image: ghcr.io/docling-project/docling-serve:latest
+    ports:
+      - "127.0.0.1:5001:5001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+    restart: unless-stopped
+    profiles: ["docling"]
+    networks:
+      - ocr-net
+
   app:
     build:
       context: .

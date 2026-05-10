@@ -139,7 +139,7 @@ func newTranslateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&req.TargetLang, "to", "", "Target language (required)")
 	// TODO: --pages is not yet implemented; the flag is reserved for future use.
 	cmd.Flags().StringVar(&req.Pages, "pages", "", "Page range (e.g. '1-5'); default: all [NOT YET IMPLEMENTED]")
-	cmd.Flags().StringVar(&req.OCREngine, "ocr-engine", "", "OCR backend: paddleocr (default) or tesseract")
+	cmd.Flags().StringVar(&req.OCREngine, "ocr-engine", "", "OCR backend: paddleocr (default), tesseract, or docling")
 	cmd.Flags().IntVar(&req.Workers, "workers", 0, "Max parallel page workers (default: from config)")
 	cmd.Flags().IntVar(&req.DPI, "dpi", 0, "Render DPI for scanned page OCR (default: from config)")
 	cmd.Flags().StringVar(&req.Password, "password", "", "Decryption password for protected PDFs")
