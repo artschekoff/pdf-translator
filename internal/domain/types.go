@@ -51,6 +51,14 @@ func IsTextualBlockType(blockType string) bool {
 	return blockType != BlockTypeImage
 }
 
+// Script identifiers used for font selection.
+const (
+	ScriptLatin    = "latin"
+	ScriptCyrillic = "cyrillic"
+	ScriptArabic   = "arabic"
+	ScriptCJK      = "cjk"
+)
+
 // OCR engine identifiers.
 const (
 	OCREnginePaddleOCR = "paddleocr"
