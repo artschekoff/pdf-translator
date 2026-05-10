@@ -47,7 +47,7 @@ func NewRendererWithFontPaths(dataDir string, fontPaths map[string]string, logge
 //
 // Font: Type0/CIDFont (Identity-H) when a TTF is available; Helvetica
 // (WinAnsiEncoding, Latin-only) as a fallback.
-func (r *Renderer) RenderPage(ctx context.Context, inputPath string, password string, pageNum int, blocks []domain.TextBlock, targetLang string, outputPath string) error {
+func (r *Renderer) RenderPage(ctx context.Context, inputPath string, password string, pageNum int, blocks []domain.TextBlock, targetLang string, keepOriginal bool, outputPath string) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -105,7 +105,11 @@ func (r *Renderer) RenderPage(ctx context.Context, inputPath string, password st
 	// Calculate total output page height including preserved margins.
 	totalH := topMargin + bottomMargin
 	for _, seg := range segments {
-		totalH += seg.outputHeight()
+		if keepOriginal && !seg.isDiagram {
+			totalH += seg.height() * 2
+		} else {
+			totalH += seg.outputHeight()
+		}
 	}
 	if totalH == 0 {
 		totalH = pageH
@@ -141,25 +145,36 @@ func (r *Renderer) RenderPage(ctx context.Context, inputPath string, password st
 
 		} else {
 			// ── Text segment ──────────────────────────────────────────────────
-			// 1. White background for the whole strip (prevents original text
-			//    bleed-through and avoids graphics-state leakage from the
-			//    original content stream).
-			// 2. Re-render original content only for formula blocks (math/symbol
-			//    fonts that cannot be reproduced with a standard TTF).
-			// 3. Translated-text overlay for non-formula blocks.
-			outYLow := outY - h
-			deltaY := outYLow - seg.yLow
-			combined = append(combined, fmt.Sprintf("q 1 1 1 rg 0 %.4f %.4f %.4f re f Q\n", outYLow, pageW, h)...)
-			if len(existingContent) > 0 {
-				for _, b := range seg.blocks {
-					if isFormulaBlock(b.Text) {
-						combined = append(combined, clipAndDrawOriginal(existingContent, b.BBox.Y, b.BBox.Height, pageW, deltaY)...)
-						combined = append(combined, "/GS_overlay gs\n"...)
+			if keepOriginal {
+				// Top strip: original content clipped from source PDF.
+				outYLow := outY - h
+				deltaY := outYLow - seg.renderLow
+				if len(existingContent) > 0 {
+					combined = append(combined, clipAndDrawOriginal(existingContent, seg.renderLow, h, pageW, deltaY)...)
+				}
+				outY = outYLow
+
+				// Bottom strip: white background + translated overlay.
+				outYLow = outY - h
+				deltaY = outYLow - seg.yLow
+				combined = append(combined, fmt.Sprintf("q 1 1 1 rg 0 %.4f %.4f %.4f re f Q\n", outYLow, pageW, h)...)
+				combined = append(combined, r.renderBlockOverlay(seg.blocks, deltaY, ttfFont, fontOverlayRegular, fontOverlayBold, pageNum)...)
+				outY = outYLow
+			} else {
+				outYLow := outY - h
+				deltaY := outYLow - seg.yLow
+				combined = append(combined, fmt.Sprintf("q 1 1 1 rg 0 %.4f %.4f %.4f re f Q\n", outYLow, pageW, h)...)
+				if len(existingContent) > 0 {
+					for _, b := range seg.blocks {
+						if isFormulaBlock(b.Text) {
+							combined = append(combined, clipAndDrawOriginal(existingContent, b.BBox.Y, b.BBox.Height, pageW, deltaY)...)
+							combined = append(combined, "/GS_overlay gs\n"...)
+						}
 					}
 				}
+				combined = append(combined, r.renderBlockOverlay(seg.blocks, deltaY, ttfFont, fontOverlayRegular, fontOverlayBold, pageNum)...)
+				outY = outYLow
 			}
-			combined = append(combined, r.renderBlockOverlay(seg.blocks, deltaY, ttfFont, fontOverlayRegular, fontOverlayBold, pageNum)...)
-			outY = outYLow
 		}
 	}
 

@@ -24,5 +24,10 @@
   "global": false,
   "simulateCommands": false,
   "simulateSubagents": false,
-  "simulateSkills": false
+  "simulateSkills": false,
+  "ca_rules": {
+    "base": "d97a82ae76b4f805f28f71e463b7b2fccf4409f3",
+    "stacks/go-gin-gorm": "db1419ec47ee5baed6f8fb945c6e3742d2d66a65",
+    "projects/juna": "56ea8486a6526968221f3fbf1c71a38dec97f141"
+  }
 }

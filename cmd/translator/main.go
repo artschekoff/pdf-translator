@@ -10,6 +10,7 @@ import (
 
 	"github.com/pdf-translator/pdf-translator/internal/config"
 	"github.com/pdf-translator/pdf-translator/internal/detector"
+	"github.com/pdf-translator/pdf-translator/internal/docling"
 	"github.com/pdf-translator/pdf-translator/internal/domain"
 	"github.com/pdf-translator/pdf-translator/internal/extractor"
 	"github.com/pdf-translator/pdf-translator/internal/pipeline"
@@ -97,6 +98,17 @@ func newTranslateCmd() *cobra.Command {
 			)
 
 			// Wire all components
+			if req.OCREngine == domain.OCREngineDocling {
+				doclingClient := docling.New(cfg.DoclingURL)
+				trans := translator.New(cfg.OpenAIAPIKey, logger)
+				rend := renderer.NewMarkdownRenderer(
+					renderer.NewFontManagerWithOverrides(cfg.DataDir, cfg.ScriptFontPaths()),
+					logger,
+				)
+				pipe := pipeline.NewDoclingPipeline(doclingClient, trans, rend, logger)
+				return pipe.Run(ctx, &req)
+			}
+
 			det := detector.New()
 			nativeExt := extractor.NewNativeExtractor()
 
@@ -127,11 +139,13 @@ func newTranslateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&req.TargetLang, "to", "", "Target language (required)")
 	// TODO: --pages is not yet implemented; the flag is reserved for future use.
 	cmd.Flags().StringVar(&req.Pages, "pages", "", "Page range (e.g. '1-5'); default: all [NOT YET IMPLEMENTED]")
-	cmd.Flags().StringVar(&req.OCREngine, "ocr-engine", "", "OCR backend: paddleocr (default) or tesseract")
+	cmd.Flags().StringVar(&req.OCREngine, "ocr-engine", "", "OCR backend: paddleocr (default), tesseract, or docling")
 	cmd.Flags().IntVar(&req.Workers, "workers", 0, "Max parallel page workers (default: from config)")
 	cmd.Flags().IntVar(&req.DPI, "dpi", 0, "Render DPI for scanned page OCR (default: from config)")
 	cmd.Flags().StringVar(&req.Password, "password", "", "Decryption password for protected PDFs")
 	cmd.Flags().BoolVar(&req.DryRun, "dry-run", false, "Extract and estimate cost without translating")
+	cmd.Flags().BoolVar(&req.KeepOriginal, "keep-original", false, "Preserve source text above each translation in the output PDF")
+	cmd.Flags().StringVar(&req.TranslateColor, "translate-color", "green", "Color for translated paragraphs in --keep-original mode (e.g. green, red, blue, #00aa00)")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable debug logging")
 
 	_ = cmd.MarkFlagRequired("to")

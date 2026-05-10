@@ -2,13 +2,14 @@ FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache gcc musl-dev \
     mupdf-dev freetype-dev harfbuzz-dev jbig2dec-dev \
-    libjpeg-turbo-dev openjpeg-dev gumbo-parser-dev zlib-dev
+    libjpeg-turbo-dev openjpeg-dev gumbo-parser-dev zlib-dev \
+    && rm -f /usr/lib/libmupdf.so*
 
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+COPY vendor/ ./vendor/
 COPY . .
-RUN CGO_ENABLED=1 go build -tags "extlib static" -o /bin/pdf-translator ./cmd/translator
+RUN CGO_ENABLED=1 go build -mod=vendor -tags "extlib static" -o /bin/pdf-translator ./cmd/translator
 
 FROM alpine:3.20
 

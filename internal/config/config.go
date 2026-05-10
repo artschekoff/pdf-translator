@@ -13,6 +13,7 @@ type Config struct {
 	OpenAIAPIKey   string        `mapstructure:"OPENAI_API_KEY"`
 	PaddleOCRURL   string        `mapstructure:"PADDLE_OCR_URL"`
 	TesseractURL   string        `mapstructure:"TESSERACT_URL"`
+	DoclingURL     string        `mapstructure:"DOCLING_URL"`
 	OCREngine      string        `mapstructure:"OCR_ENGINE"`
 	MaxPageWorkers int           `mapstructure:"MAX_PAGE_WORKERS"`
 	DPI            int           `mapstructure:"DPI"`
@@ -60,6 +61,7 @@ func Load() (*Config, error) {
 
 	viper.SetDefault("PADDLE_OCR_URL", "http://localhost:8051")
 	viper.SetDefault("TESSERACT_URL", "http://localhost:8052")
+	viper.SetDefault("DOCLING_URL", "http://localhost:5001")
 	viper.SetDefault("OCR_ENGINE", domain.OCREnginePaddleOCR)
 	viper.SetDefault("MAX_PAGE_WORKERS", 4)
 	viper.SetDefault("DPI", 300)
@@ -90,8 +92,11 @@ func (c *Config) Validate() error {
 	if c.OpenAIAPIKey == "" {
 		return fmt.Errorf("OPENAI_API_KEY is required; set it in .env or as an environment variable")
 	}
-	if c.OCREngine != domain.OCREnginePaddleOCR && c.OCREngine != domain.OCREngineTesseract {
-		return fmt.Errorf("OCR_ENGINE must be '%s' or '%s', got %q", domain.OCREnginePaddleOCR, domain.OCREngineTesseract, c.OCREngine)
+	switch c.OCREngine {
+	case domain.OCREnginePaddleOCR, domain.OCREngineTesseract, domain.OCREngineDocling:
+		// valid
+	default:
+		return fmt.Errorf("OCR_ENGINE must be 'paddleocr', 'tesseract', or 'docling', got '%s'", c.OCREngine)
 	}
 	if c.MaxPageWorkers < 1 {
 		return fmt.Errorf("MAX_PAGE_WORKERS must be >= 1, got %d", c.MaxPageWorkers)

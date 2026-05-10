@@ -51,10 +51,19 @@ func IsTextualBlockType(blockType string) bool {
 	return blockType != BlockTypeImage
 }
 
+// Script identifiers used for font selection.
+const (
+	ScriptLatin    = "latin"
+	ScriptCyrillic = "cyrillic"
+	ScriptArabic   = "arabic"
+	ScriptCJK      = "cjk"
+)
+
 // OCR engine identifiers.
 const (
 	OCREnginePaddleOCR = "paddleocr"
 	OCREngineTesseract = "tesseract"
+	OCREngineDocling   = "docling"
 )
 
 // TranslateRequest carries all parameters for a single translation job.
@@ -68,5 +77,7 @@ type TranslateRequest struct {
 	Pages      string // e.g. "1-5" or "" for all
 	Workers    int
 	DPI        int
-	DryRun     bool
+	DryRun         bool
+	KeepOriginal   bool
+	TranslateColor string // text color for translated paragraphs in keep-original mode
 }
