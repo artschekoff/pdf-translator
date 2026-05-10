@@ -14,13 +14,23 @@ services:
       retries: 20
       start_period: 180s
     restart: unless-stopped
+    networks:
+      - ocr-net
 
   tesseract:
     image: gunthercox/ocr-service:tesseract
     ports:
       - "127.0.0.1:8052:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
     profiles: ["tesseract"]
+    networks:
+      - ocr-net
 
   app:
     build:
@@ -30,10 +40,26 @@ services:
     environment:
       PADDLE_OCR_URL: http://paddleocr:8000
       TESSERACT_URL: http://tesseract:8000
+      OCR_ENGINE: ${OCR_ENGINE:-paddleocr}
+      OCR_LANG: ${OCR_LANG:-en}
+      MAX_PAGE_WORKERS: ${MAX_PAGE_WORKERS:-4}
+      DPI: ${DPI:-300}
+      HTTP_TIMEOUT: ${HTTP_TIMEOUT:-120s}
+      DATA_DIR: /data/.db
     volumes:
       - ./input:/data/input:ro
       - ./output:/data/output
+      - app-data:/data/.db
     depends_on:
       paddleocr:
         condition: service_healthy
     profiles: ["app"]
+    networks:
+      - ocr-net
+
+volumes:
+  app-data:
+
+networks:
+  ocr-net:
+    driver: bridge

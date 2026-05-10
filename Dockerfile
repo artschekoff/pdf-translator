@@ -6,9 +6,9 @@ RUN apk add --no-cache gcc musl-dev \
 
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+COPY vendor/ ./vendor/
 COPY . .
-RUN CGO_ENABLED=1 go build -tags "extlib static" -o /bin/pdf-translator ./cmd/translator
+RUN CGO_ENABLED=1 go build -mod=vendor -tags "extlib static" -o /bin/pdf-translator ./cmd/translator
 
 FROM alpine:3.20
 
