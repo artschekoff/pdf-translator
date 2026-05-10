@@ -72,7 +72,7 @@ Rules:
 - Translate heading text but keep the # prefix.
 - Translate table cell content but keep the | structure.
 - Do not translate code blocks (backtick fences).
-- Do not modify image placeholders like <!-- IMG_0 -->.
+- Do not modify image placeholders like <!-- IMG_0 --> or <!-- image -->.
 - Output only the translated Markdown with separators intact.`, from, targetLang)
 
 	var lastErr error

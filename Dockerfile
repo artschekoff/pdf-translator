@@ -2,7 +2,8 @@ FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache gcc musl-dev \
     mupdf-dev freetype-dev harfbuzz-dev jbig2dec-dev \
-    libjpeg-turbo-dev openjpeg-dev gumbo-parser-dev zlib-dev
+    libjpeg-turbo-dev openjpeg-dev gumbo-parser-dev zlib-dev \
+    && rm -f /usr/lib/libmupdf.so*
 
 WORKDIR /src
 COPY go.mod go.sum ./

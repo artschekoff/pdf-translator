@@ -77,6 +77,7 @@ type TranslateRequest struct {
 	Pages      string // e.g. "1-5" or "" for all
 	Workers    int
 	DPI        int
-	DryRun     bool
-	KeepOriginal bool
+	DryRun         bool
+	KeepOriginal   bool
+	TranslateColor string // text color for translated paragraphs in keep-original mode
 }

@@ -145,6 +145,7 @@ func newTranslateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&req.Password, "password", "", "Decryption password for protected PDFs")
 	cmd.Flags().BoolVar(&req.DryRun, "dry-run", false, "Extract and estimate cost without translating")
 	cmd.Flags().BoolVar(&req.KeepOriginal, "keep-original", false, "Preserve source text above each translation in the output PDF")
+	cmd.Flags().StringVar(&req.TranslateColor, "translate-color", "green", "Color for translated paragraphs in --keep-original mode (e.g. green, red, blue, #00aa00)")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable debug logging")
 
 	_ = cmd.MarkFlagRequired("to")

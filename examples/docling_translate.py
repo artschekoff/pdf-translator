@@ -113,6 +113,7 @@ def main():
     parser.add_argument("--no-images", action="store_true", help="Skip image extraction")
     parser.add_argument("--no-pdf", action="store_true", help="Skip PDF generation")
     parser.add_argument("--dark", action="store_true", help="Use dark theme for PDF")
+    parser.add_argument("--keep-original", action="store_true", help="Interleave original paragraph before each translation")
     args = parser.parse_args()
 
     input_path = Path(args.input)
@@ -167,7 +168,11 @@ def main():
         print(f"  [batch {i}/{len(batches)}] {len(batch)} sections, {chars} chars")
         translated_sections.extend(translate_batch(batch, args.to))
 
-    translated_md = "\n\n".join(translated_sections)
+    if args.keep_original:
+        pairs = [orig + "\n\n" + trans for orig, trans in zip(sections, translated_sections)]
+        translated_md = "\n\n---\n\n".join(pairs)
+    else:
+        translated_md = "\n\n".join(translated_sections)
     translated_md = restore_images(translated_md, images)
 
     print(f"Writing {output_path}...")

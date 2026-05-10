@@ -19,7 +19,7 @@ type MarkdownTranslator interface {
 
 // MarkdownRenderer renders a translated markdown string to a PDF file.
 type MarkdownRenderer interface {
-	RenderMarkdown(ctx context.Context, markdown, targetLang, outputPath string) error
+	RenderMarkdown(ctx context.Context, markdown, targetLang, outputPath, translateColor string) error
 }
 
 // DoclingPipeline runs the full docling extraction → translation → rendering flow.
@@ -57,36 +57,46 @@ func (p *DoclingPipeline) Run(ctx context.Context, req *domain.TranslateRequest)
 	if err != nil {
 		return fmt.Errorf("docling convert: %w", err)
 	}
-	p.logger.Info("docling conversion done", zap.Int("pages", result.Pages))
+	p.logger.Info("docling conversion done", zap.Int("markdown_bytes", len(result.Markdown)))
 
 	markdown, images := extractMDImages(result.Markdown)
-	sections := splitMDSections(markdown)
-	p.logger.Info("split markdown", zap.Int("sections", len(sections)))
+
+	// For keepOriginal we split by paragraphs so each para gets its own translation
+	// immediately after. For normal mode we split by sections (headings) for better
+	// translation context and larger batches.
+	var units []string
+	if req.KeepOriginal {
+		units = splitMDParagraphs(markdown)
+	} else {
+		units = splitMDSections(markdown)
+	}
+	p.logger.Info("split markdown", zap.Int("units", len(units)))
 
 	p.logger.Info("translating sections", zap.String("targetLang", req.TargetLang))
-	translated, err := p.translator.TranslateMarkdownSections(ctx, sections, req.SourceLang, req.TargetLang, 0)
+	translated, err := p.translator.TranslateMarkdownSections(ctx, units, req.SourceLang, req.TargetLang, 0)
 	if err != nil {
 		return fmt.Errorf("translating markdown: %w", err)
 	}
 
 	var outputMD string
 	if req.KeepOriginal {
-		pairs := make([]string, len(sections))
-		for i := range sections {
+		pairs := make([]string, len(units))
+		for i := range units {
 			trans := ""
 			if i < len(translated) {
 				trans = translated[i]
 			}
-			pairs[i] = sections[i] + "\n\n" + trans
+			// <!-- TRANS --> on its own paragraph signals the renderer to switch color.
+			pairs[i] = units[i] + "\n\n<!-- TRANS -->\n\n" + trans
 		}
-		outputMD = strings.Join(pairs, "\n\n---\n\n")
+		outputMD = strings.Join(pairs, "\n\n")
 	} else {
 		outputMD = strings.Join(translated, "\n\n")
 	}
 	outputMD = restoreMDImages(outputMD, images)
 
 	p.logger.Info("rendering markdown to PDF", zap.String("output", req.OutputPath))
-	if err := p.renderer.RenderMarkdown(ctx, outputMD, req.TargetLang, req.OutputPath); err != nil {
+	if err := p.renderer.RenderMarkdown(ctx, outputMD, req.TargetLang, req.OutputPath, req.TranslateColor); err != nil {
 		return fmt.Errorf("rendering PDF: %w", err)
 	}
 
@@ -94,7 +104,7 @@ func (p *DoclingPipeline) Run(ctx context.Context, req *domain.TranslateRequest)
 	return nil
 }
 
-var mdImgRE = regexp.MustCompile(`<!--\s*IMG_\d+\s*-->|!\[[^\]]*\]\([^)]*\)`)
+var mdImgRE = regexp.MustCompile(`<!--\s*(?:IMG_\d+|image)\s*-->|!\[[^\]]*\]\([^)]*\)`)
 
 func extractMDImages(md string) (string, map[string]string) {
 	images := make(map[string]string)
@@ -113,6 +123,35 @@ func restoreMDImages(md string, images map[string]string) string {
 		md = strings.ReplaceAll(md, key, orig)
 	}
 	return md
+}
+
+// splitMDParagraphs splits markdown on blank lines, returning non-empty blocks.
+// Used for keepOriginal mode so each paragraph is paired with its translation.
+func splitMDParagraphs(md string) []string {
+	var paragraphs []string
+	var current strings.Builder
+
+	scanner := bufio.NewScanner(strings.NewReader(md))
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			if s := strings.TrimSpace(current.String()); s != "" {
+				paragraphs = append(paragraphs, s)
+			}
+			current.Reset()
+		} else {
+			if current.Len() > 0 {
+				current.WriteByte('\n')
+			}
+			current.WriteString(line)
+		}
+	}
+	if s := strings.TrimSpace(current.String()); s != "" {
+		paragraphs = append(paragraphs, s)
+	}
+	return paragraphs
 }
 
 var mdHeadingRE = regexp.MustCompile(`^#{1,6}\s+`)

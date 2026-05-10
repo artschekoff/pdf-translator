@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/pdf-translator/pdf-translator/internal/domain"
@@ -38,7 +39,9 @@ func NewMarkdownRenderer(fontManager *FontManager, logger *zap.Logger) *Markdown
 }
 
 // RenderMarkdown renders markdown to a PDF file at outputPath.
-func (r *MarkdownRenderer) RenderMarkdown(ctx context.Context, markdown, targetLang, outputPath string) error {
+// translateColor sets the text color for paragraphs marked with <!-- TRANS --> (keep-original mode).
+// Pass "" or "black" to render all text in black.
+func (r *MarkdownRenderer) RenderMarkdown(ctx context.Context, markdown, targetLang, outputPath, translateColor string) error {
 	script := mdScriptForText(markdown)
 	ttfFont := r.mdLoadFont(ctx, script)
 
@@ -68,8 +71,9 @@ func (r *MarkdownRenderer) RenderMarkdown(ctx context.Context, markdown, targetL
 		fontResources = pdf.Dict{"F1": type1Font("Helvetica")}
 	}
 
+	cr, cg, cb := parsePDFColor(translateColor)
 	elements := parseMDElements(markdown)
-	pages := layoutMDPages(elements, ttfFont, hasTTF, mdPageW, mdPageH, mdMarginL, mdMarginR, mdMarginT, mdMarginB)
+	pages := layoutMDPages(elements, ttfFont, hasTTF, mdPageW, mdPageH, mdMarginL, mdMarginR, mdMarginT, mdMarginB, cr, cg, cb)
 
 	var pageRefs []pdf.Ref
 	for _, pg := range pages {
@@ -129,23 +133,27 @@ func (r *MarkdownRenderer) RenderMarkdown(ctx context.Context, markdown, targetL
 }
 
 type mdElement struct {
-	text     string
-	fontSize float64
-	isHR     bool
-	isEmpty  bool
+	text          string
+	fontSize      float64
+	isHR          bool
+	isEmpty       bool
+	isTranslation bool
 }
 
 var (
 	mdHeadingRE = regexp.MustCompile(`^(#{1,6})\s+(.*)`)
 	mdHRRE      = regexp.MustCompile(`^(-{3,}|\*{3,}|_{3,})$`)
-	mdImgRE     = regexp.MustCompile(`<!--\s*IMG_\d+\s*-->|!\[[^\]]*\]\([^)]*\)`)
+	mdImgRE     = regexp.MustCompile(`<!--\s*(?:IMG_\d+|image)\s*-->|!\[[^\]]*\]\([^)]*\)`)
 )
+
+var mdTransMarkerRE = regexp.MustCompile(`^<!--\s*TRANS\s*-->$`)
 
 func parseMDElements(md string) []mdElement {
 	var elems []mdElement
 	scanner := bufio.NewScanner(strings.NewReader(md))
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	var para strings.Builder
+	nextIsTranslation := false
 
 	stripInline := func(s string) string {
 		s = regexp.MustCompile(`\*\*([^*]+)\*\*`).ReplaceAllString(s, "$1")
@@ -156,12 +164,19 @@ func parseMDElements(md string) []mdElement {
 
 	flush := func() {
 		t := strings.TrimSpace(para.String())
+		para.Reset()
+		// Detect the translation marker — don't emit an element, just set the flag.
+		if mdTransMarkerRE.MatchString(t) {
+			nextIsTranslation = true
+			return
+		}
 		t = mdImgRE.ReplaceAllString(t, "")
 		t = stripInline(strings.TrimSpace(t))
 		if t != "" {
-			elems = append(elems, mdElement{text: t, fontSize: mdBodySize})
+			isTransl := nextIsTranslation
+			nextIsTranslation = false
+			elems = append(elems, mdElement{text: t, fontSize: mdBodySize, isTranslation: isTransl})
 		}
-		para.Reset()
 	}
 
 	for scanner.Scan() {
@@ -169,6 +184,8 @@ func parseMDElements(md string) []mdElement {
 
 		if m := mdHeadingRE.FindStringSubmatch(line); m != nil {
 			flush()
+			isTransl := nextIsTranslation
+			nextIsTranslation = false
 			level := len(m[1])
 			size := mdH3Size
 			if level == 1 {
@@ -178,7 +195,7 @@ func parseMDElements(md string) []mdElement {
 			}
 			text := strings.TrimSpace(mdImgRE.ReplaceAllString(m[2], ""))
 			if text != "" {
-				elems = append(elems, mdElement{text: text, fontSize: size})
+				elems = append(elems, mdElement{text: text, fontSize: size, isTranslation: isTransl})
 			}
 			continue
 		}
@@ -204,7 +221,7 @@ func parseMDElements(md string) []mdElement {
 	return elems
 }
 
-func layoutMDPages(elems []mdElement, ttf *TTFFont, hasTTF bool, pageW, pageH, mL, mR, mT, mB float64) [][]byte {
+func layoutMDPages(elems []mdElement, ttf *TTFFont, hasTTF bool, pageW, pageH, mL, mR, mT, mB float64, cr, cg, cb float64) [][]byte {
 	textW := pageW - mL - mR
 	var pages [][]byte
 	var buf strings.Builder
@@ -259,12 +276,21 @@ func layoutMDPages(elems []mdElement, ttf *TTFFont, hasTTF bool, pageW, pageH, m
 			newPage()
 		}
 
+		if el.isTranslation {
+			fmt.Fprintf(&buf, "%.3f %.3f %.3f rg\n", cr, cg, cb)
+		}
 		for _, line := range lines {
 			if curY+el.fontSize > pageH-mB {
 				newPage()
+				if el.isTranslation {
+					fmt.Fprintf(&buf, "%.3f %.3f %.3f rg\n", cr, cg, cb)
+				}
 			}
 			drawText(line, mL, curY, el.fontSize)
 			curY += lineH
+		}
+		if el.isTranslation {
+			fmt.Fprintf(&buf, "0 0 0 rg\n")
 		}
 		curY += lineH * 0.3
 	}
@@ -273,6 +299,35 @@ func layoutMDPages(elems []mdElement, ttf *TTFFont, hasTTF bool, pageW, pageH, m
 		pages = append(pages, []byte(buf.String()))
 	}
 	return pages
+}
+
+// parsePDFColor parses a color name or #RRGGBB hex string into PDF RGB values (0.0–1.0).
+func parsePDFColor(color string) (r, g, b float64) {
+	switch strings.ToLower(strings.TrimSpace(color)) {
+	case "green", "":
+		return 0, 0.50, 0
+	case "red":
+		return 0.75, 0, 0
+	case "blue":
+		return 0, 0, 0.70
+	case "purple":
+		return 0.50, 0, 0.50
+	case "orange":
+		return 0.85, 0.45, 0
+	case "black":
+		return 0, 0, 0
+	}
+	// #RRGGBB
+	hex := strings.TrimPrefix(strings.TrimSpace(color), "#")
+	if len(hex) == 6 {
+		ri, e1 := strconv.ParseInt(hex[0:2], 16, 64)
+		gi, e2 := strconv.ParseInt(hex[2:4], 16, 64)
+		bi, e3 := strconv.ParseInt(hex[4:6], 16, 64)
+		if e1 == nil && e2 == nil && e3 == nil {
+			return float64(ri) / 255, float64(gi) / 255, float64(bi) / 255
+		}
+	}
+	return 0, 0.50, 0 // fallback: green
 }
 
 func mdWrapText(text string, maxWidth float64, ttf *TTFFont, fontSize float64) []string {
