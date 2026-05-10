@@ -55,6 +55,7 @@ func IsTextualBlockType(blockType string) bool {
 const (
 	OCREnginePaddleOCR = "paddleocr"
 	OCREngineTesseract = "tesseract"
+	OCREngineDocling   = "docling"
 )
 
 // TranslateRequest carries all parameters for a single translation job.
