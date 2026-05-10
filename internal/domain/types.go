@@ -69,4 +69,5 @@ type TranslateRequest struct {
 	Workers    int
 	DPI        int
 	DryRun     bool
+	KeepOriginal bool
 }
