@@ -83,7 +83,7 @@ validate: fmt vet lint test
 
 # ─── Docker: OCR Services (local dev mode) ──────────────────
 
-.PHONY: services-up services-down services-up-all services-logs services-status
+.PHONY: services-up services-down services-up-all services-up-docling services-logs services-status
 
 services-up:
 	$(COMPOSE) up -d paddleocr
@@ -94,8 +94,12 @@ services-up-all:
 	@echo "PaddleOCR: http://localhost:8051"
 	@echo "Tesseract: http://localhost:8052"
 
+services-up-docling:
+	$(COMPOSE) --profile docling up -d
+	@echo "Docling running at http://localhost:5001"
+
 services-down:
-	$(COMPOSE) --profile tesseract down
+	$(COMPOSE) --profile tesseract --profile docling down
 
 services-logs:
 	$(COMPOSE) logs -f paddleocr tesseract
@@ -224,8 +228,9 @@ help:
 	@echo "  validate         Run all checks (fmt -> vet -> lint -> test)"
 	@echo ""
 	@echo "Docker (OCR services for local dev):"
-	@echo "  services-up      Start PaddleOCR"
-	@echo "  services-up-all  Start PaddleOCR + Tesseract"
+	@echo "  services-up          Start PaddleOCR"
+	@echo "  services-up-all      Start PaddleOCR + Tesseract"
+	@echo "  services-up-docling  Start Docling (for --ocr-engine docling)"
 	@echo "  services-down    Stop all Docker services"
 	@echo "  services-logs    Tail OCR service logs"
 	@echo "  services-status  Show Docker service status"

@@ -20,9 +20,10 @@ type DocumentJob struct {
 	OCREngine  string    `gorm:"not null;default:paddleocr"`
 	TotalPages int       `gorm:"not null"`
 	TempDir    string    `gorm:"not null"`
-	DPI        int       `gorm:"not null;default:300"`
-	Password   string `gorm:"-"`
-	Status     JobStatus `gorm:"not null;default:pending"`
+	DPI          int       `gorm:"not null;default:300"`
+	Password     string    `gorm:"-"`
+	KeepOriginal bool      `gorm:"not null;default:false"`
+	Status       JobStatus `gorm:"not null;default:pending"`
 	Error      string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time

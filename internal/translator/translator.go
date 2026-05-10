@@ -85,7 +85,7 @@ func (t *Translator) TranslateBlocks(ctx context.Context, blocks []domain.TextBl
 }
 
 func (t *Translator) batchTranslate(ctx context.Context, blocks []domain.TextBlock, sourceLang, targetLang string) ([]domain.TextBlock, error) {
-	prompt, err := buildBatchPrompt(blocks, sourceLang, targetLang)
+	prompt, err := buildBatchPrompt(blocks)
 	if err != nil {
 		return nil, fmt.Errorf("building batch prompt: %w", err)
 	}
@@ -235,7 +235,7 @@ Rules:
 - Do NOT translate proper nouns, code, URLs, or email addresses.`, from, targetLang)
 }
 
-func buildBatchPrompt(blocks []domain.TextBlock, sourceLang, targetLang string) (string, error) {
+func buildBatchPrompt(blocks []domain.TextBlock) (string, error) {
 	type inputBlock struct {
 		ID   int    `json:"id"`
 		Text string `json:"text"`
