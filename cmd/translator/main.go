@@ -10,6 +10,7 @@ import (
 
 	"github.com/pdf-translator/pdf-translator/internal/config"
 	"github.com/pdf-translator/pdf-translator/internal/detector"
+	"github.com/pdf-translator/pdf-translator/internal/docling"
 	"github.com/pdf-translator/pdf-translator/internal/domain"
 	"github.com/pdf-translator/pdf-translator/internal/extractor"
 	"github.com/pdf-translator/pdf-translator/internal/pipeline"
@@ -97,6 +98,17 @@ func newTranslateCmd() *cobra.Command {
 			)
 
 			// Wire all components
+			if req.OCREngine == domain.OCREngineDocling {
+				doclingClient := docling.New(cfg.DoclingURL)
+				trans := translator.New(cfg.OpenAIAPIKey, logger)
+				rend := renderer.NewMarkdownRenderer(
+					renderer.NewFontManagerWithOverrides(cfg.DataDir, cfg.ScriptFontPaths()),
+					logger,
+				)
+				pipe := pipeline.NewDoclingPipeline(doclingClient, trans, rend, logger)
+				return pipe.Run(ctx, &req)
+			}
+
 			det := detector.New()
 			nativeExt := extractor.NewNativeExtractor()
 

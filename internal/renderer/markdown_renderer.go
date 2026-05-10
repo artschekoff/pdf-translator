@@ -138,7 +138,7 @@ type mdElement struct {
 var (
 	mdHeadingRE = regexp.MustCompile(`^(#{1,6})\s+(.*)`)
 	mdHRRE      = regexp.MustCompile(`^(-{3,}|\*{3,}|_{3,})$`)
-	mdImgRE     = regexp.MustCompile(`<!--\s*IMG_\d+\s*-->|!\[[^\]]*\]\([^)]{0,4096}\)`)
+	mdImgRE     = regexp.MustCompile(`<!--\s*IMG_\d+\s*-->|!\[[^\]]*\]\([^)]*\)`)
 )
 
 func parseMDElements(md string) []mdElement {

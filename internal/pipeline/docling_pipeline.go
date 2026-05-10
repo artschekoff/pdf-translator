@@ -94,7 +94,7 @@ func (p *DoclingPipeline) Run(ctx context.Context, req *domain.TranslateRequest)
 	return nil
 }
 
-var mdImgRE = regexp.MustCompile(`<!--\s*IMG_\d+\s*-->|!\[[^\]]*\]\([^)]{0,8192}\)`)
+var mdImgRE = regexp.MustCompile(`<!--\s*IMG_\d+\s*-->|!\[[^\]]*\]\([^)]*\)`)
 
 func extractMDImages(md string) (string, map[string]string) {
 	images := make(map[string]string)
