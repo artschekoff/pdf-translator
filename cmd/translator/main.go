@@ -132,6 +132,7 @@ func newTranslateCmd() *cobra.Command {
 	cmd.Flags().IntVar(&req.DPI, "dpi", 0, "Render DPI for scanned page OCR (default: from config)")
 	cmd.Flags().StringVar(&req.Password, "password", "", "Decryption password for protected PDFs")
 	cmd.Flags().BoolVar(&req.DryRun, "dry-run", false, "Extract and estimate cost without translating")
+	cmd.Flags().BoolVar(&req.KeepOriginal, "keep-original", false, "Preserve source text above each translation in the output PDF")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable debug logging")
 
 	_ = cmd.MarkFlagRequired("to")
