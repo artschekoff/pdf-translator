@@ -1,3 +1,5 @@
+<p align="center"><img src="images/hero.jpg" alt="PDF Translator"></p>
+
 <div align="center">
 
 # 📄 PDF Translator
