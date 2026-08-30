@@ -88,7 +88,7 @@ No local Go or MuPDF installation required.
 
 ```bash
 # 1. Clone and configure
-git clone https://github.com/your-org/pdf-translator
+git clone https://github.com/artschekoff/pdf-translator
 cd pdf-translator
 cp .env.example .env
 # Edit .env and set OPENAI_API_KEY=sk-...
